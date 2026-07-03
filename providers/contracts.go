@@ -128,3 +128,81 @@ type MediaServerProvider interface {
 	RefreshLibrary(ctx context.Context, externalLibraryID string) error
 	Latest(ctx context.Context, limit int) ([]LibraryItem, error)
 }
+
+// ---- 元数据（docs/metadata-provider.md）----
+
+// MetaExternalIDs 是媒体在各外部数据源的 ID 映射；零值表示未知。
+type MetaExternalIDs struct {
+	TMDBID   int64
+	IMDBID   string
+	TVDBID   int64
+	DoubanID string
+}
+
+type MetaSearchResult struct {
+	Provider      string // 插件 id，如 "tmdb"
+	ProviderID    string // 数据源内媒体 ID
+	MediaType     string // movie / series
+	Title         string
+	OriginalTitle string
+	Year          int
+	Overview      string
+	PosterURL     string
+	Score         float64 // 数据源评分 0-10
+	Popularity    float64
+}
+
+type MetaAlias struct {
+	Name     string
+	Language string // 语言或地区码，如 zh / US；可空
+}
+
+type MetaSeason struct {
+	SeasonNumber     int
+	Title            string
+	AirDate          string // YYYY-MM-DD，可空
+	EpisodeCount     int
+	ProviderSeasonID string
+}
+
+type MetaDetail struct {
+	Provider       string
+	ProviderID     string
+	MediaType      string // movie / series
+	Title          string
+	OriginalTitle  string
+	Year           int
+	Overview       string
+	Status         string // released / upcoming / airing / ended
+	Genres         []string
+	RuntimeMinutes int
+	PosterURL      string
+	BackdropURL    string
+	ExternalIDs    MetaExternalIDs
+	Aliases        []MetaAlias
+	Seasons        []MetaSeason // 仅剧集
+	Raw            []byte       // 数据源原始响应，落 media.raw_json 兜底
+}
+
+type MetaEpisode struct {
+	SeasonNumber      int
+	EpisodeNumber     int
+	Title             string
+	AirDate           string
+	RuntimeMinutes    int
+	Overview          string
+	ProviderEpisodeID string
+}
+
+// MetadataProvider 屏蔽 TMDB、TVDB、豆瓣等元数据源差异。
+// 元数据是申请、订阅、查重和命名的业务真源；媒体库只回答"是否已入库"。
+type MetadataProvider interface {
+	Kind() string
+	TestConnection(ctx context.Context) error
+	// Search 按标题搜索；mediaType 为 movie / series / 空（不限）；year 为 0 表示不限年份。
+	Search(ctx context.Context, query, mediaType string, year int) ([]MetaSearchResult, error)
+	Detail(ctx context.Context, mediaType, providerID string) (MetaDetail, error)
+	SeasonEpisodes(ctx context.Context, providerID string, seasonNumber int) ([]MetaEpisode, error)
+	// FindByExternalID 用外部 ID（如 IMDb）反查；找不到返回空切片，不算错误。
+	FindByExternalID(ctx context.Context, ids MetaExternalIDs) ([]MetaSearchResult, error)
+}
