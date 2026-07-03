@@ -58,6 +58,7 @@ type Plugin struct {
 	NewDownloader  func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
 	NewMediaServer func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
 	NewMetadata    func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
+	NewSite        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。

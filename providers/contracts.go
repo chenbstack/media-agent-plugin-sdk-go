@@ -214,3 +214,12 @@ type MetadataProvider interface {
 	// FindByExternalID 用外部 ID（如 IMDb）反查；找不到返回空切片，不算错误。
 	FindByExternalID(ctx context.Context, ids MetaExternalIDs) ([]MetaSearchResult, error)
 }
+
+// SiteProvider 屏蔽站点差异，供站点账号健康检查使用。
+// 第一版只做可达性/登录态检查；站点搜索接入时（indexer-rules.md）
+// 扩展为完整 IndexerProvider（搜索、分类、限流声明）。
+type SiteProvider interface {
+	Kind() string
+	// TestConnection 用账号凭据（Cookie/UA/代理）访问站点验证可达性。
+	TestConnection(ctx context.Context) error
+}
