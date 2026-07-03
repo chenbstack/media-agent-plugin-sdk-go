@@ -21,6 +21,7 @@ type Downloader struct {
 	files     map[string][]providers.TorrentFile
 	connErr   error
 	nextState providers.DownloadState
+	transfer  providers.TransferInfo
 }
 
 var _ providers.DownloaderProvider = (*Downloader)(nil)
@@ -45,6 +46,18 @@ func (d *Downloader) CompleteTask(hash string) {
 		t.Progress = 1
 		t.CompletedAt = time.Now()
 	}
+}
+
+func (d *Downloader) SetTransferInfo(info providers.TransferInfo) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.transfer = info
+}
+
+func (d *Downloader) TransferInfo(context.Context) (providers.TransferInfo, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.transfer, d.connErr
 }
 
 func (d *Downloader) Kind() string { return "fake" }
@@ -181,6 +194,23 @@ func (m *MediaServer) Libraries(context.Context) ([]providers.Library, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]providers.Library(nil), m.libraries...), nil
+}
+
+func (m *MediaServer) Items(_ context.Context, libraryID string, startIndex, limit int) ([]providers.LibraryItem, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var inLib []providers.LibraryItem
+	for _, item := range m.items {
+		if libraryID == "" || item.LibraryID == libraryID {
+			inLib = append(inLib, item)
+		}
+	}
+	total := len(inLib)
+	if startIndex >= total {
+		return nil, total, nil
+	}
+	end := min(startIndex+limit, total)
+	return append([]providers.LibraryItem(nil), inLib[startIndex:end]...), total, nil
 }
 
 func (m *MediaServer) Search(_ context.Context, query string) ([]providers.LibraryItem, error) {

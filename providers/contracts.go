@@ -63,6 +63,14 @@ type DownloaderProvider interface {
 	Resume(ctx context.Context, hash string) error
 	Remove(ctx context.Context, hash string, deleteData bool) error
 	Files(ctx context.Context, hash string) ([]TorrentFile, error)
+	// TransferInfo 返回下载器当前的全局传输速度，用于连接卡片实时展示。
+	TransferInfo(ctx context.Context) (TransferInfo, error)
+}
+
+// TransferInfo 是下载器全局传输状态快照。
+type TransferInfo struct {
+	DownloadSpeed int64 // bytes/s
+	UploadSpeed   int64 // bytes/s
 }
 
 // ---- 媒体库 ----
@@ -111,6 +119,9 @@ type MediaServerProvider interface {
 	Kind() string
 	TestConnection(ctx context.Context) error
 	Libraries(ctx context.Context) ([]Library, error)
+	// Items 分页拉取库内条目（movie/series/season/episode），用于媒体库同步缓存。
+	// startIndex 从 0 开始；返回 total 为库内条目总数，同步必须分页可恢复。
+	Items(ctx context.Context, libraryID string, startIndex, limit int) ([]LibraryItem, int, error)
 	Search(ctx context.Context, query string) ([]LibraryItem, error)
 	Exists(ctx context.Context, ref MediaRef) (Existence, error)
 	RefreshItem(ctx context.Context, externalID string) error
