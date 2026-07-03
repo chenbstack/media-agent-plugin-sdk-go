@@ -180,8 +180,15 @@ type MetaDetail struct {
 	BackdropURL    string
 	ExternalIDs    MetaExternalIDs
 	Aliases        []MetaAlias
+	Cast           []MetaCastMember
 	Seasons        []MetaSeason // 仅剧集
 	Raw            []byte       // 数据源原始响应，落 media.raw_json 兜底
+}
+
+type MetaCastMember struct {
+	Name       string
+	Character  string
+	ProfileURL string // 头像缩略图
 }
 
 type MetaEpisode struct {
@@ -191,6 +198,7 @@ type MetaEpisode struct {
 	AirDate           string
 	RuntimeMinutes    int
 	Overview          string
+	StillURL          string // 集剧照缩略图
 	ProviderEpisodeID string
 }
 
