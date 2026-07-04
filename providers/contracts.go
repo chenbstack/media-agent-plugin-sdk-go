@@ -231,12 +231,44 @@ type SiteProfile struct {
 	Leeching    int     `json:"leeching"`
 }
 
-// SiteProvider 屏蔽站点差异，供站点账号健康检查和用户数据同步使用。
-// 站点搜索接入时（indexer-rules.md）扩展为完整 IndexerProvider（搜索、分类、限流声明）。
+// TorrentSearchRequest 是种子搜索请求。Keyword 为空表示浏览站点最新种子。
+type TorrentSearchRequest struct {
+	Keyword   string // 搜索关键词
+	MediaType string // movie / series / 空（不限）；决定使用站点的哪个搜索路径和分类
+	IMDBID    string // 可选；站点支持 imdb 搜索时优先使用（如 tt1234567）
+	Page      int    // 页码，0 起
+}
+
+// TorrentResult 是归一化的种子搜索结果（字段对齐 data-model.md 的 search_candidates）。
+// 体积字段单位 bytes；解析不到的字段保持零值。
+type TorrentResult struct {
+	Title       string   `json:"title"`
+	Subtitle    string   `json:"subtitle,omitempty"`
+	DetailURL   string   `json:"detail_url"`
+	DownloadURL string   `json:"download_url,omitempty"`
+	Magnet      string   `json:"magnet,omitempty"`
+	SizeBytes   int64    `json:"size_bytes"`
+	Seeders     int      `json:"seeders"`
+	Leechers    int      `json:"leechers"`
+	Grabs       int      `json:"grabs"` // 完成数
+	PublishedAt string   `json:"published_at,omitempty"` // YYYY-MM-DD HH:MM:SS
+	Category    string   `json:"category,omitempty"`
+	IMDBID      string   `json:"imdb_id,omitempty"`
+	// 促销因子：DownloadFactor 1=正常计下载量 0=免费；UploadFactor 1=正常 2=上传翻倍。
+	DownloadFactor float64  `json:"download_factor"`
+	UploadFactor   float64  `json:"upload_factor"`
+	Promotion      string   `json:"promotion,omitempty"` // 由促销因子派生：免费 / 2X / 2X免费 / 50% 等
+	HitAndRun      bool     `json:"hit_and_run,omitempty"`
+	Labels         []string `json:"labels,omitempty"`
+}
+
+// SiteProvider 屏蔽站点差异，供站点账号健康检查、用户数据同步和种子搜索使用。
 type SiteProvider interface {
 	Kind() string
 	// TestConnection 用账号凭据（Cookie/UA/代理）访问站点验证可达性与登录态。
 	TestConnection(ctx context.Context) error
 	// Profile 抓取并解析站点用户数据；Cookie 失效返回错误。
 	Profile(ctx context.Context) (SiteProfile, error)
+	// Search 按关键词搜索种子并归一化；站点无搜索规则时返回错误。
+	Search(ctx context.Context, req TorrentSearchRequest) ([]TorrentResult, error)
 }
