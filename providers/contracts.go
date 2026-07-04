@@ -215,11 +215,28 @@ type MetadataProvider interface {
 	FindByExternalID(ctx context.Context, ids MetaExternalIDs) ([]MetaSearchResult, error)
 }
 
-// SiteProvider 屏蔽站点差异，供站点账号健康检查使用。
-// 第一版只做可达性/登录态检查；站点搜索接入时（indexer-rules.md）
-// 扩展为完整 IndexerProvider（搜索、分类、限流声明）。
+// SiteProfile 是站点账号的用户数据快照（NexusPHP 系站点通用字段）。
+// 体积字段单位 bytes；解析不到的字段保持零值。
+type SiteProfile struct {
+	Username    string  `json:"username"`
+	UserID      string  `json:"user_id,omitempty"`
+	UserLevel   string  `json:"user_level,omitempty"`
+	JoinAt      string  `json:"join_at,omitempty"`
+	Upload      int64   `json:"upload"`
+	Download    int64   `json:"download"`
+	Ratio       float64 `json:"ratio"`
+	Bonus       float64 `json:"bonus"`
+	Seeding     int     `json:"seeding"`
+	SeedingSize int64   `json:"seeding_size"`
+	Leeching    int     `json:"leeching"`
+}
+
+// SiteProvider 屏蔽站点差异，供站点账号健康检查和用户数据同步使用。
+// 站点搜索接入时（indexer-rules.md）扩展为完整 IndexerProvider（搜索、分类、限流声明）。
 type SiteProvider interface {
 	Kind() string
-	// TestConnection 用账号凭据（Cookie/UA/代理）访问站点验证可达性。
+	// TestConnection 用账号凭据（Cookie/UA/代理）访问站点验证可达性与登录态。
 	TestConnection(ctx context.Context) error
+	// Profile 抓取并解析站点用户数据；Cookie 失效返回错误。
+	Profile(ctx context.Context) (SiteProfile, error)
 }
