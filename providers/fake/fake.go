@@ -127,14 +127,34 @@ func (d *Downloader) Files(_ context.Context, hash string) ([]providers.TorrentF
 	if _, ok := d.tasks[hash]; !ok {
 		return nil, fmt.Errorf("fake downloader: 任务不存在 %s", hash)
 	}
-	return d.files[hash], nil
+	files := append([]providers.TorrentFile(nil), d.files[hash]...)
+	return files, nil
+}
+
+func (d *Downloader) SetFileSelection(_ context.Context, hash string, files []providers.TorrentFile) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.tasks[hash]; !ok {
+		return fmt.Errorf("fake downloader: 任务不存在 %s", hash)
+	}
+	next := append([]providers.TorrentFile(nil), files...)
+	for i := range next {
+		if next[i].Selected && next[i].Priority <= 0 {
+			next[i].Priority = 1
+		}
+		if !next[i].Selected {
+			next[i].Priority = 0
+		}
+	}
+	d.files[hash] = next
+	return nil
 }
 
 // SetFiles 注入任务的文件列表，模拟整季包。
 func (d *Downloader) SetFiles(hash string, files []providers.TorrentFile) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.files[hash] = files
+	d.files[hash] = append([]providers.TorrentFile(nil), files...)
 }
 
 func (d *Downloader) setState(hash string, state providers.DownloadState) error {

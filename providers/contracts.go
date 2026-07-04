@@ -45,12 +45,16 @@ type TorrentTask struct {
 }
 
 type TorrentFile struct {
-	Index     int
-	Path      string
-	SizeBytes int64
-	Completed int64
-	Selected  bool
-	Priority  int
+	Index         int
+	Path          string
+	SizeBytes     int64
+	Completed     int64
+	Selected      bool
+	Priority      int
+	MediaKind     string
+	SeasonNumber  int
+	EpisodeNumber int
+	Confidence    float64
 }
 
 // DownloaderProvider 屏蔽 qBittorrent、Transmission 等下载器差异。
@@ -63,6 +67,7 @@ type DownloaderProvider interface {
 	Resume(ctx context.Context, hash string) error
 	Remove(ctx context.Context, hash string, deleteData bool) error
 	Files(ctx context.Context, hash string) ([]TorrentFile, error)
+	SetFileSelection(ctx context.Context, hash string, files []TorrentFile) error
 	// TransferInfo 返回下载器当前的全局传输速度，用于连接卡片实时展示。
 	TransferInfo(ctx context.Context) (TransferInfo, error)
 }
@@ -242,18 +247,18 @@ type TorrentSearchRequest struct {
 // TorrentResult 是归一化的种子搜索结果（字段对齐 data-model.md 的 search_candidates）。
 // 体积字段单位 bytes；解析不到的字段保持零值。
 type TorrentResult struct {
-	Title       string   `json:"title"`
-	Subtitle    string   `json:"subtitle,omitempty"`
-	DetailURL   string   `json:"detail_url"`
-	DownloadURL string   `json:"download_url,omitempty"`
-	Magnet      string   `json:"magnet,omitempty"`
-	SizeBytes   int64    `json:"size_bytes"`
-	Seeders     int      `json:"seeders"`
-	Leechers    int      `json:"leechers"`
-	Grabs       int      `json:"grabs"` // 完成数
-	PublishedAt string   `json:"published_at,omitempty"` // YYYY-MM-DD HH:MM:SS
-	Category    string   `json:"category,omitempty"`
-	IMDBID      string   `json:"imdb_id,omitempty"`
+	Title       string `json:"title"`
+	Subtitle    string `json:"subtitle,omitempty"`
+	DetailURL   string `json:"detail_url"`
+	DownloadURL string `json:"download_url,omitempty"`
+	Magnet      string `json:"magnet,omitempty"`
+	SizeBytes   int64  `json:"size_bytes"`
+	Seeders     int    `json:"seeders"`
+	Leechers    int    `json:"leechers"`
+	Grabs       int    `json:"grabs"`                  // 完成数
+	PublishedAt string `json:"published_at,omitempty"` // YYYY-MM-DD HH:MM:SS
+	Category    string `json:"category,omitempty"`
+	IMDBID      string `json:"imdb_id,omitempty"`
 	// 促销因子：DownloadFactor 1=正常计下载量 0=免费；UploadFactor 1=正常 2=上传翻倍。
 	DownloadFactor float64  `json:"download_factor"`
 	UploadFactor   float64  `json:"upload_factor"`
