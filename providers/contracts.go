@@ -30,18 +30,20 @@ type AddTorrentRequest struct {
 }
 
 type TorrentTask struct {
-	Hash         string
-	Name         string
-	State        DownloadState
-	Progress     float64 // 0-1
-	Ratio        float64
-	SizeBytes    int64
-	SavePath     string
-	Category     string
-	Tags         []string
-	AddedAt      time.Time
-	CompletedAt  time.Time
-	StateMessage string
+	Hash          string
+	Name          string
+	State         DownloadState
+	Progress      float64 // 0-1
+	Ratio         float64
+	SizeBytes     int64
+	DownloadSpeed int64 // bytes/s
+	UploadSpeed   int64 // bytes/s
+	SavePath      string
+	Category      string
+	Tags          []string
+	AddedAt       time.Time
+	CompletedAt   time.Time
+	StateMessage  string
 }
 
 type TorrentFile struct {
