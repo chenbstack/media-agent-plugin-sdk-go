@@ -23,10 +23,17 @@ type Field struct {
 	Placeholder string   `json:"placeholder,omitempty"`
 	Help        string   `json:"help,omitempty"`
 	Options     []Option `json:"options,omitempty"`
+	AllowCustom bool     `json:"allow_custom,omitempty"`
 	// DynamicOptions 表示 select 的选项可由插件实例在运行时补充
 	// （宿主经 fields/{field}/options 端点调用 Plugin.FieldOptions）。
 	// 此时取值校验放宽为任意非空字符串，前端显示刷新按钮。
-	DynamicOptions bool `json:"dynamic_options,omitempty"`
+	DynamicOptions bool            `json:"dynamic_options,omitempty"`
+	ShowWhen       *FieldCondition `json:"show_when,omitempty"`
+}
+
+type FieldCondition struct {
+	Field  string `json:"field"`
+	Equals any    `json:"equals"`
 }
 
 type Option struct {
@@ -187,8 +194,8 @@ func (f Field) check(value any) (any, string) {
 				return str, ""
 			}
 		}
-		// 动态选项无法在 schema 里穷举（如具体媒体库），放行非空取值
-		if f.DynamicOptions && str != "" {
+		// 动态选项或自定义选项无法在 schema 里穷举，放行非空取值。
+		if (f.DynamicOptions || f.AllowCustom) && str != "" {
 			return str, ""
 		}
 		return nil, "取值不在选项内"

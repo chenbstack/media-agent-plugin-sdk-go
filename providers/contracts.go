@@ -4,6 +4,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -220,6 +221,98 @@ type MetadataProvider interface {
 	SeasonEpisodes(ctx context.Context, providerID string, seasonNumber int) ([]MetaEpisode, error)
 	// FindByExternalID 用外部 ID（如 IMDb）反查；找不到返回空切片，不算错误。
 	FindByExternalID(ctx context.Context, ids MetaExternalIDs) ([]MetaSearchResult, error)
+}
+
+// ---- 模型提供方 ----
+
+var (
+	ErrModelProviderInvalidInput     = errors.New("模型参数无效")
+	ErrModelProviderNotConfigured    = errors.New("模型未配置")
+	ErrModelProviderRuntimeMissing   = errors.New("模型运行器不可用")
+	ErrModelProviderDownloadFailed   = errors.New("模型下载失败")
+	ErrModelProviderUninstallFailed  = errors.New("模型卸载失败")
+	ErrModelProviderGenerationFailed = errors.New("模型生成失败")
+)
+
+type ModelConfig struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Provider         string   `json:"provider"`
+	Runtime          string   `json:"runtime"`
+	Backend          string   `json:"backend,omitempty"`
+	Command          string   `json:"command"`
+	ModelPath        string   `json:"model_path"`
+	ModelName        string   `json:"model_name,omitempty"`
+	BaseURL          string   `json:"base_url,omitempty"`
+	APIKey           string   `json:"api_key,omitempty"`
+	APIKeyEnv        string   `json:"api_key_env,omitempty"`
+	DownloadSite     string   `json:"download_site,omitempty"`
+	DownloadURL      string   `json:"download_url,omitempty"`
+	SHA256           string   `json:"sha256,omitempty"`
+	Args             []string `json:"args"`
+	Enabled          bool     `json:"enabled"`
+	UseCPU           bool     `json:"use_cpu"`
+	Threads          int      `json:"threads"`
+	ContextTokens    int      `json:"context_tokens"`
+	DefaultMaxTokens int      `json:"default_max_tokens"`
+	Notes            string   `json:"notes,omitempty"`
+}
+
+type ModelGenerateRequest struct {
+	Model     ModelConfig
+	Prompt    string
+	MaxTokens int
+	Now       func() time.Time
+}
+
+type ModelGenerateResult struct {
+	Output   string
+	Stderr   string
+	Started  time.Time
+	Finished time.Time
+}
+
+type ModelDownloadRequest struct {
+	Model          ModelConfig
+	TimeoutSeconds int
+	Now            func() time.Time
+}
+
+type ModelDownloadResult struct {
+	ModelID             string `json:"model_id"`
+	Name                string `json:"name"`
+	URL                 string `json:"url"`
+	ModelPath           string `json:"model_path"`
+	Bytes               int64  `json:"bytes"`
+	SHA256              string `json:"sha256"`
+	StartedAt           string `json:"started_at"`
+	FinishedAt          string `json:"finished_at"`
+	ElapsedMilliseconds int64  `json:"elapsed_ms"`
+}
+
+type ModelUninstallRequest struct {
+	Model          ModelConfig
+	TimeoutSeconds int
+	Now            func() time.Time
+}
+
+type ModelUninstallResult struct {
+	ModelID             string `json:"model_id"`
+	Name                string `json:"name"`
+	ModelPath           string `json:"model_path"`
+	StartedAt           string `json:"started_at"`
+	FinishedAt          string `json:"finished_at"`
+	ElapsedMilliseconds int64  `json:"elapsed_ms"`
+}
+
+// ModelProvider 屏蔽 llama.cpp、Ollama、OpenAI-compatible 等模型提供方差异。
+type ModelProvider interface {
+	Kind() string
+	ValidateModel(model ModelConfig) error
+	Generate(ctx context.Context, req ModelGenerateRequest) (ModelGenerateResult, error)
+	Download(ctx context.Context, req ModelDownloadRequest) (ModelDownloadResult, error)
+	Uninstall(ctx context.Context, req ModelUninstallRequest) (ModelUninstallResult, error)
+	CommandDisplay(model ModelConfig) string
 }
 
 // SiteProfile 是站点账号的用户数据快照（NexusPHP 系站点通用字段）。
