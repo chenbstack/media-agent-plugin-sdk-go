@@ -362,6 +362,24 @@ type TorrentResult struct {
 	Labels         []string `json:"labels,omitempty"`
 }
 
+type SubtitleAttachment struct {
+	Name        string `json:"name"`
+	Language    string `json:"language,omitempty"`
+	DownloadURL string `json:"download_url"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
+}
+
+type MediaInfoTag struct {
+	Facet string `json:"facet"`
+	Value string `json:"value"`
+}
+
+type TorrentMediaInfo struct {
+	Raw            string         `json:"raw,omitempty"`
+	Tags           []MediaInfoTag `json:"tags,omitempty"`
+	ObservedFacets []string       `json:"observed_facets,omitempty"`
+}
+
 // SiteProvider 屏蔽站点差异，供站点账号健康检查、用户数据同步和种子搜索使用。
 type SiteProvider interface {
 	Kind() string
