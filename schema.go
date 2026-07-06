@@ -24,6 +24,7 @@ type Field struct {
 	Help        string   `json:"help,omitempty"`
 	Options     []Option `json:"options,omitempty"`
 	AllowCustom bool     `json:"allow_custom,omitempty"`
+	Multiline   bool     `json:"multiline,omitempty"`
 	// DynamicOptions 表示 select 的选项可由插件实例在运行时补充
 	// （宿主经 fields/{field}/options 端点调用 Plugin.FieldOptions）。
 	// 此时取值校验放宽为任意非空字符串，前端显示刷新按钮。

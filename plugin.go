@@ -64,6 +64,14 @@ type Plugin struct {
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。
 	FieldOptions func(ctx context.Context, inst Instance, secrets SecretResolver, field string) ([]Option, error)
+
+	// ValidateConfig 在通用 schema 校验之后运行，供插件按其他字段或外部资源包
+	// 做二次校验；例如站点插件按 base_url 匹配资源包后校验认证字段。
+	ValidateConfig func(config map[string]any) error
+
+	// ConfigSchemaForConfig 根据当前配置返回有效 schema。用于字段集合需要依赖
+	// 其他字段或资源包的插件；nil 表示始终使用 ConfigSchema。
+	ConfigSchemaForConfig func(config map[string]any) ConfigSchema
 }
 
 func (p Plugin) validate() error {
