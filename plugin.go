@@ -55,6 +55,7 @@ type Plugin struct {
 	IconSVG []byte
 
 	// 工厂按能力可选实现；nil 表示插件不提供该类 Provider。
+	NewStorage     func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
 	NewDownloader  func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
 	NewMediaServer func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
 	NewMetadata    func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)

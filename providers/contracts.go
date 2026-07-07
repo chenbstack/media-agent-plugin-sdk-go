@@ -5,8 +5,47 @@ package providers
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 )
+
+// ---- 存储 ----
+
+type StorageInfo struct {
+	Kind         string
+	RootPath     string
+	Capabilities []string
+}
+
+// StorageProvider 屏蔽本地目录、SMB 和云盘等存储差异。
+type StorageProvider interface {
+	Kind() string
+	TestConnection(ctx context.Context) error
+	Info(ctx context.Context) (StorageInfo, error)
+	EnsureMounted(ctx context.Context) error
+	Unmount(ctx context.Context) error
+}
+
+type StorageFileInfo struct {
+	Name    string
+	Size    int64
+	IsDir   bool
+	ModTime time.Time
+}
+
+// FileStorageProvider 是整理执行需要的文件操作能力。
+// 具体协议细节由插件内部维护，业务层只使用这里的通用语义。
+type FileStorageProvider interface {
+	StorageProvider
+	Stat(ctx context.Context, name string) (StorageFileInfo, error)
+	MkdirAll(ctx context.Context, path string) error
+	Remove(ctx context.Context, name string) error
+	OpenReader(ctx context.Context, name string) (io.ReadCloser, error)
+	OpenWriter(ctx context.Context, name string) (io.WriteCloser, error)
+	Rename(ctx context.Context, oldpath, newpath string) error
+	Link(ctx context.Context, oldname, newname string) error
+	Symlink(ctx context.Context, oldname, newname string) error
+}
 
 // ---- 下载器 ----
 
