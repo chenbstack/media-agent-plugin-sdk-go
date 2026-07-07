@@ -6,6 +6,7 @@ package pluginsdk
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -13,19 +14,50 @@ import (
 )
 
 type Manifest struct {
-	ID           string      `yaml:"id" json:"id"`
-	Name         string      `yaml:"name" json:"name"`
-	Version      string      `yaml:"version" json:"version"`
-	Description  string      `yaml:"description" json:"description,omitempty"`
-	Type         string      `yaml:"type" json:"type"` // builtin / cli / rule / ui
-	Capabilities []string    `yaml:"capabilities" json:"capabilities"`
-	Permissions  Permissions `yaml:"permissions" json:"permissions"`
-	Resources    Resources   `yaml:"resources" json:"resources"`
+	ID           string            `yaml:"id" json:"id"`
+	Name         string            `yaml:"name" json:"name"`
+	Version      string            `yaml:"version" json:"version"`
+	Description  string            `yaml:"description" json:"description,omitempty"`
+	Type         string            `yaml:"type" json:"type"` // builtin / cli / rule / ui
+	Entry        map[string]string `yaml:"entry,omitempty" json:"entry,omitempty"`
+	Protocol     string            `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+	Transport    string            `yaml:"transport,omitempty" json:"transport,omitempty"`
+	ServeArgs    []string          `yaml:"serve_args,omitempty" json:"serve_args,omitempty"`
+	StdioArgs    []string          `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
+	Capabilities []string          `yaml:"capabilities" json:"capabilities"`
+	Permissions  Permissions       `yaml:"permissions" json:"permissions"`
+	Resources    Resources         `yaml:"resources" json:"resources"`
 }
 
 type Permissions struct {
-	Network []string `yaml:"network" json:"network"`
-	Secrets []string `yaml:"secrets" json:"secrets"`
+	Network    []string               `yaml:"network" json:"network"`
+	Secrets    []string               `yaml:"secrets" json:"secrets"`
+	Data       []string               `yaml:"data,omitempty" json:"data,omitempty"`
+	Host       []string               `yaml:"host,omitempty" json:"host,omitempty"`
+	Filesystem []FilesystemPermission `yaml:"filesystem,omitempty" json:"filesystem,omitempty"`
+}
+
+type FilesystemPermission struct {
+	Path   string `yaml:"path" json:"path"`
+	Access string `yaml:"access" json:"access"` // read / read_write
+}
+
+func (p Permissions) HasHost(permission string) bool {
+	for _, value := range p.Host {
+		if value == permission || value == "host:"+permission {
+			return true
+		}
+	}
+	return false
+}
+
+func (p Permissions) HasData(permission string) bool {
+	for _, value := range p.Data {
+		if value == permission || value == "data:"+permission {
+			return true
+		}
+	}
+	return false
 }
 
 type Resources struct {
@@ -38,12 +70,42 @@ type SecretResolver interface {
 	Reveal(ctx context.Context, ref, reason string) (string, error)
 }
 
+// KVStore 是宿主为单个插件实例注入的轻量 JSON KV 存储。
+// key 在该插件实例内唯一；ttl <= 0 表示不过期。
+type KVStore interface {
+	Get(ctx context.Context, key string, out any) (bool, error)
+	Set(ctx context.Context, key string, value any, ttl time.Duration) error
+	Delete(ctx context.Context, key string) error
+	DeletePrefix(ctx context.Context, prefix string) error
+}
+
 // Instance 是一个已校验的连接实例配置（downloaders/media_servers 表中的一行）。
 // Config 中 secret 字段的值是 secrets 表引用，需通过 SecretResolver 解密。
 type Instance struct {
 	ID     string
 	Name   string
 	Config map[string]any
+	KV     KVStore
+	DB     PluginDB
+	Logger Logger
+}
+
+// AuthStartResult 是插件交互式认证流程的启动结果。
+type AuthStartResult struct {
+	Flow        string `json:"flow"`
+	SessionID   string `json:"session_id"`
+	CodeContent string `json:"code_content,omitempty"`
+	CodeURL     string `json:"code_url,omitempty"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+// AuthCheckResult 是插件交互式认证流程的轮询结果。
+// Config 中返回的明文字段由前端合并到当前配置表单，随后走原有保存流程入库和加密。
+type AuthCheckResult struct {
+	Status  string         `json:"status"`
+	Message string         `json:"message,omitempty"`
+	Config  map[string]any `json:"config,omitempty"`
 }
 
 // Plugin 是注册到内核的插件描述。官方插件在编译期构造；
@@ -65,6 +127,10 @@ type Plugin struct {
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。
 	FieldOptions func(ctx context.Context, inst Instance, secrets SecretResolver, field string) ([]Option, error)
+
+	// StartAuth / CheckAuth 为插件提供通用交互式认证流程，如扫码登录。
+	StartAuth func(ctx context.Context, inst Instance, flow string) (AuthStartResult, error)
+	CheckAuth func(ctx context.Context, inst Instance, flow, sessionID string) (AuthCheckResult, error)
 
 	// ValidateConfig 在通用 schema 校验之后运行，供插件按其他字段或外部资源包
 	// 做二次校验；例如站点插件按 base_url 匹配资源包后校验认证字段。
@@ -106,9 +172,18 @@ func (p Plugin) HasCapability(domain string) bool {
 
 // MustParseManifest 解析 go:embed 的 manifest.yaml，用于官方插件编译期声明。
 func MustParseManifest(data []byte) Manifest {
-	var m Manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
+	m, err := ParseManifest(data)
+	if err != nil {
 		panic("解析插件 manifest: " + err.Error())
 	}
 	return m
+}
+
+// ParseManifest 解析插件 manifest.yaml / plugin.yaml。
+func ParseManifest(data []byte) (Manifest, error) {
+	var m Manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return Manifest{}, err
+	}
+	return m, nil
 }

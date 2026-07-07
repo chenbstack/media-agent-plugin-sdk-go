@@ -206,9 +206,18 @@ func (f Field) check(value any) (any, string) {
 
 // MustParseConfigSchema 解析 go:embed 的 config.schema.json。
 func MustParseConfigSchema(data []byte) ConfigSchema {
-	var s ConfigSchema
-	if err := json.Unmarshal(data, &s); err != nil {
+	s, err := ParseConfigSchema(data)
+	if err != nil {
 		panic("解析 config.schema.json: " + err.Error())
 	}
 	return s
+}
+
+// ParseConfigSchema 解析配置 schema。
+func ParseConfigSchema(data []byte) (ConfigSchema, error) {
+	var s ConfigSchema
+	if err := json.Unmarshal(data, &s); err != nil {
+		return ConfigSchema{}, err
+	}
+	return s, nil
 }

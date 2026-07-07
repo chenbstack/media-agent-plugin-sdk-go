@@ -47,6 +47,28 @@ type FileStorageProvider interface {
 	Symlink(ctx context.Context, oldname, newname string) error
 }
 
+// UploadSource 是宿主为插件准备好的可重复读取上传源。
+// 插件可以按需使用 Size/SHA1/OpenRange 做秒传、校验片段或分片上传。
+type UploadSource interface {
+	Name() string
+	Size() int64
+	SHA1(ctx context.Context) (string, error)
+	Open(ctx context.Context) (io.ReadCloser, error)
+	OpenRange(ctx context.Context, offset, length int64) (io.ReadCloser, error)
+}
+
+// UploadProvider 是云盘等非流式写入存储可选实现的上传能力。
+// 宿主会先把来源准备为 UploadSource，再交给插件内部完成协议级上传。
+type UploadProvider interface {
+	Upload(ctx context.Context, name string, source UploadSource) error
+}
+
+// ServerSideCopyProvider 是云盘/网络存储可选实现的同存储复制能力。
+// 未实现时，整理执行会继续使用 OpenReader/OpenWriter 做流式复制。
+type ServerSideCopyProvider interface {
+	Copy(ctx context.Context, oldname, newname string) error
+}
+
 // ---- 下载器 ----
 
 type DownloadState string
