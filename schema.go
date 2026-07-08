@@ -30,11 +30,19 @@ type Field struct {
 	// 此时取值校验放宽为任意非空字符串，前端显示刷新按钮。
 	DynamicOptions bool            `json:"dynamic_options,omitempty"`
 	ShowWhen       *FieldCondition `json:"show_when,omitempty"`
+	UI             *FieldUI        `json:"ui,omitempty"`
 }
 
 type FieldCondition struct {
 	Field  string `json:"field"`
 	Equals any    `json:"equals"`
+}
+
+type FieldUI struct {
+	Placement         string `json:"placement,omitempty"`
+	Browse            string `json:"browse,omitempty"`
+	Gate              string `json:"gate,omitempty"`
+	HideAccessPreview bool   `json:"hide_access_preview,omitempty"`
 }
 
 type Option struct {

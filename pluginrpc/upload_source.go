@@ -16,7 +16,7 @@ type uploadSourceServer struct {
 	broker *hcplugin.MuxBroker
 }
 
-type openRangeRequest struct {
+type OpenRangeRequest struct {
 	Offset int64
 	Length int64
 }
@@ -47,7 +47,7 @@ func (s *uploadSourceServer) Open(args Empty, reply *BrokerReply) error {
 	return nil
 }
 
-func (s *uploadSourceServer) OpenRange(req openRangeRequest, reply *BrokerReply) error {
+func (s *uploadSourceServer) OpenRange(req OpenRangeRequest, reply *BrokerReply) error {
 	reply.ID = serveReader(s.broker, func() (io.ReadCloser, error) {
 		return s.source.OpenRange(s.ctx, req.Offset, req.Length)
 	})
@@ -97,7 +97,7 @@ func (s *remoteUploadSource) Open(ctx context.Context) (io.ReadCloser, error) {
 
 func (s *remoteUploadSource) OpenRange(ctx context.Context, offset, length int64) (io.ReadCloser, error) {
 	var reply BrokerReply
-	if err := s.client.Call("Plugin.OpenRange", openRangeRequest{Offset: offset, Length: length}, &reply); err != nil {
+	if err := s.client.Call("Plugin.OpenRange", OpenRangeRequest{Offset: offset, Length: length}, &reply); err != nil {
 		return nil, err
 	}
 	conn, err := s.broker.Dial(reply.ID)

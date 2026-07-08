@@ -2,6 +2,7 @@ package pluginrpc
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"media-agent-lab/server/pkg/pluginsdk"
@@ -33,12 +34,16 @@ func (c *Client) ConfigSchema() (pluginsdk.ConfigSchema, error) {
 }
 
 func (c *Client) ValidateConfig(config map[string]any) error {
+	return c.ValidateConfigContext(context.Background(), config)
+}
+
+func (c *Client) ValidateConfigContext(ctx context.Context, config map[string]any) error {
 	configJSON, err := encodeConfig(config)
 	if err != nil {
 		return err
 	}
 	var reply Empty
-	return c.client.Call("Plugin.ValidateConfig", ConfigRequest{ConfigJSON: configJSON}, &reply)
+	return c.call(ctx, "Plugin.ValidateConfig", ConfigRequest{ConfigJSON: configJSON}, &reply)
 }
 
 func (c *Client) FieldOptions(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, field string) ([]pluginsdk.Option, error) {
@@ -58,12 +63,16 @@ func (c *Client) FieldOptions(inst pluginsdk.Instance, secrets pluginsdk.SecretR
 }
 
 func (c *Client) StartAuth(inst pluginsdk.Instance, flow string) (pluginsdk.AuthStartResult, error) {
-	payload, err := c.instancePayload(context.Background(), inst, nil)
+	return c.StartAuthContext(context.Background(), inst, flow)
+}
+
+func (c *Client) StartAuthContext(ctx context.Context, inst pluginsdk.Instance, flow string) (pluginsdk.AuthStartResult, error) {
+	payload, err := c.instancePayload(ctx, inst, nil)
 	if err != nil {
 		return pluginsdk.AuthStartResult{}, err
 	}
 	var reply JSONReply
-	if err := c.client.Call("Plugin.StartAuth", AuthStartRequest{Instance: payload, Flow: flow}, &reply); err != nil {
+	if err := c.call(ctx, "Plugin.StartAuth", AuthStartRequest{Instance: payload, Flow: flow}, &reply); err != nil {
 		return pluginsdk.AuthStartResult{}, err
 	}
 	var out pluginsdk.AuthStartResult
@@ -74,12 +83,16 @@ func (c *Client) StartAuth(inst pluginsdk.Instance, flow string) (pluginsdk.Auth
 }
 
 func (c *Client) CheckAuth(inst pluginsdk.Instance, flow, sessionID string) (pluginsdk.AuthCheckResult, error) {
-	payload, err := c.instancePayload(context.Background(), inst, nil)
+	return c.CheckAuthContext(context.Background(), inst, flow, sessionID)
+}
+
+func (c *Client) CheckAuthContext(ctx context.Context, inst pluginsdk.Instance, flow, sessionID string) (pluginsdk.AuthCheckResult, error) {
+	payload, err := c.instancePayload(ctx, inst, nil)
 	if err != nil {
 		return pluginsdk.AuthCheckResult{}, err
 	}
 	var reply JSONReply
-	if err := c.client.Call("Plugin.CheckAuth", AuthCheckRequest{Instance: payload, Flow: flow, SessionID: sessionID}, &reply); err != nil {
+	if err := c.call(ctx, "Plugin.CheckAuth", AuthCheckRequest{Instance: payload, Flow: flow, SessionID: sessionID}, &reply); err != nil {
 		return pluginsdk.AuthCheckResult{}, err
 	}
 	var out pluginsdk.AuthCheckResult
@@ -87,6 +100,19 @@ func (c *Client) CheckAuth(inst pluginsdk.Instance, flow, sessionID string) (plu
 		return pluginsdk.AuthCheckResult{}, err
 	}
 	return out, nil
+}
+
+func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	call := c.client.Go(serviceMethod, args, reply, nil)
+	select {
+	case done := <-call.Done:
+		return done.Error
+	case <-ctx.Done():
+		return fmt.Errorf("%s: %w", serviceMethod, ctx.Err())
+	}
 }
 
 func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (InstancePayload, error) {
@@ -187,6 +213,22 @@ func (p *storageProvider) Stat(ctx context.Context, name string) (providers.Stor
 		}
 		var reply JSONReply
 		if err := c.client.Call("Plugin.StorageStat", req, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, err
+}
+
+func (p *storageProvider) ListDir(ctx context.Context, path string) ([]providers.StorageFileInfo, error) {
+	var out []providers.StorageFileInfo
+	err := p.withClientOperation(ctx, "storage.list_dir", func(c *Client) error {
+		req, err := c.pathRequest(ctx, p.inst, p.secrets, path)
+		if err != nil {
+			return err
+		}
+		var reply JSONReply
+		if err := c.client.Call("Plugin.StorageListDir", req, &reply); err != nil {
 			return err
 		}
 		return decodeJSON(reply.Data, &out)

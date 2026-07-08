@@ -182,6 +182,28 @@ func (s *rpcServer) StorageStat(req StoragePathRequest, reply *JSONReply) error 
 	return nil
 }
 
+func (s *rpcServer) StorageListDir(req StoragePathRequest, reply *JSONReply) error {
+	provider, closeFn, err := s.storage(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	lister, ok := provider.(providers.StorageDirectoryLister)
+	if !ok {
+		return fmt.Errorf("插件未实现目录浏览")
+	}
+	entries, err := lister.ListDir(context.Background(), req.Path)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(entries)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) StorageMkdirAll(req StoragePathRequest, reply *Empty) error {
 	provider, closeFn, err := s.fileStorage(req.Instance)
 	if err != nil {

@@ -26,12 +26,12 @@ type hostServicesServer struct {
 	logger            pluginsdk.Logger
 }
 
-type revealRequest struct {
+type RevealRequest struct {
 	Ref    string
 	Reason string
 }
 
-func (s *hostServicesServer) Reveal(req revealRequest, reply *StringReply) error {
+func (s *hostServicesServer) Reveal(req RevealRequest, reply *StringReply) error {
 	if s.secrets == nil {
 		return fmt.Errorf("宿主未提供 SecretResolver")
 	}
@@ -46,16 +46,16 @@ func (s *hostServicesServer) Reveal(req revealRequest, reply *StringReply) error
 	return nil
 }
 
-type kvGetRequest struct {
+type KVGetRequest struct {
 	Key string
 }
 
-type kvGetReply struct {
+type KVGetReply struct {
 	Found bool
 	Data  []byte
 }
 
-func (s *hostServicesServer) KVGet(req kvGetRequest, reply *kvGetReply) error {
+func (s *hostServicesServer) KVGet(req KVGetRequest, reply *KVGetReply) error {
 	if s.kv == nil {
 		return fmt.Errorf("宿主未提供 KVStore")
 	}
@@ -72,13 +72,13 @@ func (s *hostServicesServer) KVGet(req kvGetRequest, reply *kvGetReply) error {
 	return nil
 }
 
-type kvSetRequest struct {
+type KVSetRequest struct {
 	Key        string
 	Data       []byte
 	TTLSeconds int64
 }
 
-func (s *hostServicesServer) KVSet(req kvSetRequest, reply *Empty) error {
+func (s *hostServicesServer) KVSet(req KVSetRequest, reply *Empty) error {
 	if s.kv == nil {
 		return fmt.Errorf("宿主未提供 KVStore")
 	}
@@ -94,7 +94,7 @@ func (s *hostServicesServer) KVSet(req kvSetRequest, reply *Empty) error {
 	return s.kv.Set(s.ctx, req.Key, value, time.Duration(req.TTLSeconds)*time.Second)
 }
 
-func (s *hostServicesServer) KVDelete(req kvGetRequest, reply *Empty) error {
+func (s *hostServicesServer) KVDelete(req KVGetRequest, reply *Empty) error {
 	if s.kv == nil {
 		return fmt.Errorf("宿主未提供 KVStore")
 	}
@@ -104,7 +104,7 @@ func (s *hostServicesServer) KVDelete(req kvGetRequest, reply *Empty) error {
 	return s.kv.Delete(s.ctx, req.Key)
 }
 
-func (s *hostServicesServer) KVDeletePrefix(req kvGetRequest, reply *Empty) error {
+func (s *hostServicesServer) KVDeletePrefix(req KVGetRequest, reply *Empty) error {
 	if s.kv == nil {
 		return fmt.Errorf("宿主未提供 KVStore")
 	}
@@ -114,11 +114,11 @@ func (s *hostServicesServer) KVDeletePrefix(req kvGetRequest, reply *Empty) erro
 	return s.kv.DeletePrefix(s.ctx, req.Key)
 }
 
-type dbTableNameRequest struct {
+type DBTableNameRequest struct {
 	LogicalName string
 }
 
-func (s *hostServicesServer) DBTableName(req dbTableNameRequest, reply *StringReply) error {
+func (s *hostServicesServer) DBTableName(req DBTableNameRequest, reply *StringReply) error {
 	if s.db == nil {
 		return fmt.Errorf("宿主未提供 PluginDB")
 	}
@@ -133,17 +133,17 @@ func (s *hostServicesServer) DBTableName(req dbTableNameRequest, reply *StringRe
 	return nil
 }
 
-type dbExecRequest struct {
+type DBExecRequest struct {
 	Statement string
 	ArgsJSON  []byte
 }
 
-type dbExecReply struct {
+type DBExecReply struct {
 	RowsAffected int64
 	LastInsertID int64
 }
 
-func (s *hostServicesServer) DBExec(req dbExecRequest, reply *dbExecReply) error {
+func (s *hostServicesServer) DBExec(req DBExecRequest, reply *DBExecReply) error {
 	if s.db == nil {
 		return fmt.Errorf("宿主未提供 PluginDB")
 	}
@@ -163,11 +163,11 @@ func (s *hostServicesServer) DBExec(req dbExecRequest, reply *dbExecReply) error
 	return nil
 }
 
-type dbQueryReply struct {
+type DBQueryReply struct {
 	RowsJSON []byte
 }
 
-func (s *hostServicesServer) DBQuery(req dbExecRequest, reply *dbQueryReply) error {
+func (s *hostServicesServer) DBQuery(req DBExecRequest, reply *DBQueryReply) error {
 	if s.db == nil {
 		return fmt.Errorf("宿主未提供 PluginDB")
 	}
@@ -190,18 +190,18 @@ func (s *hostServicesServer) DBQuery(req dbExecRequest, reply *dbQueryReply) err
 	return nil
 }
 
-type logAttr struct {
+type LogAttr struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
 }
 
-type logRequest struct {
+type LogRequest struct {
 	Level   pluginsdk.LogLevel `json:"level"`
 	Message string             `json:"message"`
-	Attrs   []logAttr          `json:"attrs,omitempty"`
+	Attrs   []LogAttr          `json:"attrs,omitempty"`
 }
 
-func (s *hostServicesServer) Log(req logRequest, reply *Empty) error {
+func (s *hostServicesServer) Log(req LogRequest, reply *Empty) error {
 	if s.logger == nil {
 		return nil
 	}
@@ -262,15 +262,15 @@ func (c *hostServicesClient) Close() error {
 
 func (c *hostServicesClient) Reveal(ctx context.Context, ref, reason string) (string, error) {
 	var reply StringReply
-	if err := c.client.Call("Plugin.Reveal", revealRequest{Ref: ref, Reason: reason}, &reply); err != nil {
+	if err := c.client.Call("Plugin.Reveal", RevealRequest{Ref: ref, Reason: reason}, &reply); err != nil {
 		return "", err
 	}
 	return reply.Value, nil
 }
 
 func (c *hostServicesClient) Get(ctx context.Context, key string, out any) (bool, error) {
-	var reply kvGetReply
-	if err := c.client.Call("Plugin.KVGet", kvGetRequest{Key: key}, &reply); err != nil {
+	var reply KVGetReply
+	if err := c.client.Call("Plugin.KVGet", KVGetRequest{Key: key}, &reply); err != nil {
 		return false, err
 	}
 	if !reply.Found {
@@ -291,7 +291,7 @@ func (c *hostServicesClient) Set(ctx context.Context, key string, value any, ttl
 		return err
 	}
 	var reply Empty
-	return c.client.Call("Plugin.KVSet", kvSetRequest{
+	return c.client.Call("Plugin.KVSet", KVSetRequest{
 		Key:        key,
 		Data:       data,
 		TTLSeconds: int64(ttl / time.Second),
@@ -300,17 +300,17 @@ func (c *hostServicesClient) Set(ctx context.Context, key string, value any, ttl
 
 func (c *hostServicesClient) Delete(ctx context.Context, key string) error {
 	var reply Empty
-	return c.client.Call("Plugin.KVDelete", kvGetRequest{Key: key}, &reply)
+	return c.client.Call("Plugin.KVDelete", KVGetRequest{Key: key}, &reply)
 }
 
 func (c *hostServicesClient) DeletePrefix(ctx context.Context, prefix string) error {
 	var reply Empty
-	return c.client.Call("Plugin.KVDeletePrefix", kvGetRequest{Key: prefix}, &reply)
+	return c.client.Call("Plugin.KVDeletePrefix", KVGetRequest{Key: prefix}, &reply)
 }
 
 func (c *hostServicesClient) TableName(logicalName string) (string, error) {
 	var reply StringReply
-	if err := c.client.Call("Plugin.DBTableName", dbTableNameRequest{LogicalName: logicalName}, &reply); err != nil {
+	if err := c.client.Call("Plugin.DBTableName", DBTableNameRequest{LogicalName: logicalName}, &reply); err != nil {
 		return "", err
 	}
 	return reply.Value, nil
@@ -321,8 +321,8 @@ func (c *hostServicesClient) Exec(ctx context.Context, statement string, args ..
 	if err != nil {
 		return pluginsdk.DBResult{}, err
 	}
-	var reply dbExecReply
-	if err := c.client.Call("Plugin.DBExec", dbExecRequest{Statement: statement, ArgsJSON: argsJSON}, &reply); err != nil {
+	var reply DBExecReply
+	if err := c.client.Call("Plugin.DBExec", DBExecRequest{Statement: statement, ArgsJSON: argsJSON}, &reply); err != nil {
 		return pluginsdk.DBResult{}, err
 	}
 	return pluginsdk.DBResult{RowsAffected: reply.RowsAffected, LastInsertID: reply.LastInsertID}, nil
@@ -333,8 +333,8 @@ func (c *hostServicesClient) Query(ctx context.Context, statement string, args .
 	if err != nil {
 		return nil, err
 	}
-	var reply dbQueryReply
-	if err := c.client.Call("Plugin.DBQuery", dbExecRequest{Statement: statement, ArgsJSON: argsJSON}, &reply); err != nil {
+	var reply DBQueryReply
+	if err := c.client.Call("Plugin.DBQuery", DBExecRequest{Statement: statement, ArgsJSON: argsJSON}, &reply); err != nil {
 		return nil, err
 	}
 	return decodeDBRows(reply.RowsJSON)
@@ -342,7 +342,7 @@ func (c *hostServicesClient) Query(ctx context.Context, statement string, args .
 
 func (c *hostServicesClient) Log(ctx context.Context, level pluginsdk.LogLevel, message string, attrs ...any) {
 	var reply Empty
-	_ = c.client.Call("Plugin.Log", logRequest{
+	_ = c.client.Call("Plugin.Log", LogRequest{
 		Level:   level,
 		Message: message,
 		Attrs:   logAttrs(attrs),
@@ -365,8 +365,8 @@ func (c *hostServicesClient) Error(ctx context.Context, message string, attrs ..
 	c.Log(ctx, pluginsdk.LogLevelError, message, attrs...)
 }
 
-func logAttrs(attrs []any) []logAttr {
-	out := make([]logAttr, 0, len(attrs)/2)
+func logAttrs(attrs []any) []LogAttr {
+	out := make([]LogAttr, 0, len(attrs)/2)
 	for i := 0; i < len(attrs); i += 2 {
 		key := fmt.Sprint(attrs[i])
 		if key == "" {
@@ -376,7 +376,7 @@ func logAttrs(attrs []any) []logAttr {
 		if i+1 < len(attrs) {
 			value = jsonSafeValue(attrs[i+1])
 		}
-		out = append(out, logAttr{Key: key, Value: value})
+		out = append(out, LogAttr{Key: key, Value: value})
 	}
 	return out
 }

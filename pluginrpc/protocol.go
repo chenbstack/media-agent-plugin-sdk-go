@@ -300,6 +300,8 @@ type ExternalPlugin struct {
 	Credentials       *ProcessCredentials
 }
 
+const externalPluginAuthTimeout = 45 * time.Second
+
 func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	out := pluginsdk.Plugin{
 		Manifest:     e.Manifest,
@@ -309,7 +311,7 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			return e.withClientOperation(ctx, "plugin.validate_config", func(c *Client) error {
-				return c.ValidateConfig(config)
+				return c.ValidateConfigContext(ctx, config)
 			})
 		},
 	}
@@ -327,8 +329,10 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	}
 	out.StartAuth = func(ctx context.Context, inst pluginsdk.Instance, flow string) (pluginsdk.AuthStartResult, error) {
 		var result pluginsdk.AuthStartResult
-		err := e.withClientOperation(ctx, "plugin.auth.start", func(c *Client) error {
-			got, err := c.StartAuth(inst, flow)
+		callCtx, cancel := contextWithTimeout(ctx, externalPluginAuthTimeout)
+		defer cancel()
+		err := e.withClientOperation(callCtx, "plugin.auth.start", func(c *Client) error {
+			got, err := c.StartAuthContext(callCtx, inst, flow)
 			if err != nil {
 				return err
 			}
@@ -339,8 +343,10 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	}
 	out.CheckAuth = func(ctx context.Context, inst pluginsdk.Instance, flow, sessionID string) (pluginsdk.AuthCheckResult, error) {
 		var result pluginsdk.AuthCheckResult
-		err := e.withClientOperation(ctx, "plugin.auth.check", func(c *Client) error {
-			got, err := c.CheckAuth(inst, flow, sessionID)
+		callCtx, cancel := contextWithTimeout(ctx, externalPluginAuthTimeout)
+		defer cancel()
+		err := e.withClientOperation(callCtx, "plugin.auth.check", func(c *Client) error {
+			got, err := c.CheckAuthContext(callCtx, inst, flow, sessionID)
 			if err != nil {
 				return err
 			}
@@ -355,6 +361,13 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 		}
 	}
 	return out
+}
+
+func contextWithTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func (e ExternalPlugin) withClient(ctx context.Context, fn func(*Client) error) error {

@@ -33,6 +33,12 @@ type StorageFileInfo struct {
 	ModTime time.Time
 }
 
+// StorageDirectoryLister 是支持按目录逐层浏览的可选能力。
+// 插件需在 manifest 中声明 storage.browse，宿主才会向 UI 暴露目录选择入口。
+type StorageDirectoryLister interface {
+	ListDir(ctx context.Context, path string) ([]StorageFileInfo, error)
+}
+
 // FileStorageProvider 是整理执行需要的文件操作能力。
 // 具体协议细节由插件内部维护，业务层只使用这里的通用语义。
 type FileStorageProvider interface {
