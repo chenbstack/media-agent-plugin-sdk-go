@@ -15,6 +15,8 @@ type StorageInfo struct {
 	Kind         string
 	RootPath     string
 	Capabilities []string
+	UsedBytes    int64 `json:"used_bytes,omitempty"`
+	TotalBytes   int64 `json:"total_bytes,omitempty"`
 }
 
 // StorageProvider 屏蔽本地目录、SMB 和云盘等存储差异。
