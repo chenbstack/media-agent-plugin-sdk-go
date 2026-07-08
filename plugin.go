@@ -14,19 +14,20 @@ import (
 )
 
 type Manifest struct {
-	ID           string            `yaml:"id" json:"id"`
-	Name         string            `yaml:"name" json:"name"`
-	Version      string            `yaml:"version" json:"version"`
-	Description  string            `yaml:"description" json:"description,omitempty"`
-	Type         string            `yaml:"type" json:"type"` // builtin / cli / rule / ui
-	Entry        map[string]string `yaml:"entry,omitempty" json:"entry,omitempty"`
-	Protocol     string            `yaml:"protocol,omitempty" json:"protocol,omitempty"`
-	Transport    string            `yaml:"transport,omitempty" json:"transport,omitempty"`
-	ServeArgs    []string          `yaml:"serve_args,omitempty" json:"serve_args,omitempty"`
-	StdioArgs    []string          `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
-	Capabilities []string          `yaml:"capabilities" json:"capabilities"`
-	Permissions  Permissions       `yaml:"permissions" json:"permissions"`
-	Resources    Resources         `yaml:"resources" json:"resources"`
+	ID            string              `yaml:"id" json:"id"`
+	Name          string              `yaml:"name" json:"name"`
+	Version       string              `yaml:"version" json:"version"`
+	Description   string              `yaml:"description" json:"description,omitempty"`
+	Type          string              `yaml:"type" json:"type"` // builtin / cli / rule / ui
+	Entry         map[string]string   `yaml:"entry,omitempty" json:"entry,omitempty"`
+	Protocol      string              `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+	Transport     string              `yaml:"transport,omitempty" json:"transport,omitempty"`
+	ServeArgs     []string            `yaml:"serve_args,omitempty" json:"serve_args,omitempty"`
+	StdioArgs     []string            `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
+	Capabilities  []string            `yaml:"capabilities" json:"capabilities"`
+	Subscriptions []EventSubscription `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
+	Permissions   Permissions         `yaml:"permissions" json:"permissions"`
+	Resources     Resources           `yaml:"resources" json:"resources"`
 }
 
 type Permissions struct {
@@ -63,6 +64,40 @@ func (p Permissions) HasData(permission string) bool {
 type Resources struct {
 	MemoryLimitMB      int `yaml:"memory_limit_mb" json:"memory_limit_mb"`
 	IdleTimeoutSeconds int `yaml:"idle_timeout_seconds" json:"idle_timeout_seconds"`
+}
+
+type EventSubscription struct {
+	Type    string `yaml:"type" json:"type"`
+	Version int    `yaml:"version" json:"version"`
+	Phase   string `yaml:"phase,omitempty" json:"phase,omitempty"`
+	Mode    string `yaml:"mode,omitempty" json:"mode,omitempty"`
+}
+
+type EventResource struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type EventActor struct {
+	Type   string `json:"type"`
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+type EventEnvelope struct {
+	EventID    string         `json:"event_id"`
+	Type       string         `json:"type"`
+	Version    int            `json:"version"`
+	Phase      string         `json:"phase,omitempty"`
+	OccurredAt string         `json:"occurred_at"`
+	Actor      EventActor     `json:"actor,omitempty"`
+	Resource   EventResource  `json:"resource,omitempty"`
+	Payload    map[string]any `json:"payload,omitempty"`
+}
+
+type EventSubscriber interface {
+	HandleEvent(ctx context.Context, event EventEnvelope) error
 }
 
 // SecretResolver 由宿主注入，插件按引用解密密钥；每次读取都会写审计。
@@ -117,12 +152,13 @@ type Plugin struct {
 	IconSVG []byte
 
 	// 工厂按能力可选实现；nil 表示插件不提供该类 Provider。
-	NewStorage     func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
-	NewDownloader  func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
-	NewMediaServer func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
-	NewMetadata    func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
-	NewSite        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
-	NewModel       func() providers.ModelProvider
+	NewStorage         func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
+	NewDownloader      func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
+	NewMediaServer     func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
+	NewMetadata        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
+	NewSite            func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
+	NewModel           func() providers.ModelProvider
+	NewEventSubscriber func(ctx context.Context, inst Instance, secrets SecretResolver) (EventSubscriber, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。
@@ -156,6 +192,14 @@ func (p Plugin) validate() error {
 	}
 	if len(m.Capabilities) == 0 {
 		return fmt.Errorf("插件 %s: 必须声明至少一个 capability", m.ID)
+	}
+	for _, sub := range m.Subscriptions {
+		if sub.Type == "" {
+			return fmt.Errorf("插件 %s: event subscription 必须包含 type", m.ID)
+		}
+		if sub.Version <= 0 {
+			return fmt.Errorf("插件 %s: event subscription %s 必须包含正数 version", m.ID, sub.Type)
+		}
 	}
 	return p.ConfigSchema.validate(m.ID)
 }

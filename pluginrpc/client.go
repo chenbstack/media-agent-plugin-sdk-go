@@ -2,6 +2,7 @@ package pluginrpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -102,6 +103,19 @@ func (c *Client) CheckAuthContext(ctx context.Context, inst pluginsdk.Instance, 
 	return out, nil
 }
 
+func (c *Client) HandleEventContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, event pluginsdk.EventEnvelope) error {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return err
+	}
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	var reply Empty
+	return c.call(ctx, "Plugin.HandleEvent", EventRequest{Instance: payload, EventJSON: eventJSON}, &reply)
+}
+
 func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply any) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -149,6 +163,18 @@ type storageProvider struct {
 	external ExternalPlugin
 	inst     pluginsdk.Instance
 	secrets  pluginsdk.SecretResolver
+}
+
+type eventSubscriber struct {
+	external ExternalPlugin
+	inst     pluginsdk.Instance
+	secrets  pluginsdk.SecretResolver
+}
+
+func (s *eventSubscriber) HandleEvent(ctx context.Context, event pluginsdk.EventEnvelope) error {
+	return s.external.withClientOperation(ctx, "plugin.event.handle", func(c *Client) error {
+		return c.HandleEventContext(ctx, s.inst, s.secrets, event)
+	})
 }
 
 func (p *storageProvider) Kind() string {
@@ -321,6 +347,25 @@ func (p *storageProvider) Upload(ctx context.Context, name string, source provid
 			UploadSourceBrokerID: sourceID,
 		}, &reply)
 	})
+}
+
+func (p *storageProvider) ResolvePlaybackURL(ctx context.Context, input providers.PlaybackURLInput) (providers.PlaybackURLResult, error) {
+	var out providers.PlaybackURLResult
+	err := p.withClientOperation(ctx, "storage.playback_url", func(c *Client) error {
+		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		var reply JSONReply
+		if err := c.client.Call("Plugin.StorageResolvePlaybackURL", StoragePlaybackURLRequest{
+			Instance: payload,
+			Input:    input,
+		}, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, err
 }
 
 func (p *storageProvider) callPath(ctx context.Context, operation, method, path string) error {

@@ -2,6 +2,7 @@ package pluginrpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/rpc"
@@ -107,6 +108,26 @@ func (s *rpcServer) CheckAuth(req AuthCheckRequest, reply *JSONReply) error {
 	}
 	*reply = out
 	return nil
+}
+
+func (s *rpcServer) HandleEvent(req EventRequest, reply *Empty) error {
+	if s.plugin.NewEventSubscriber == nil {
+		return fmt.Errorf("插件未实现事件订阅")
+	}
+	inst, secrets, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	var event pluginsdk.EventEnvelope
+	if err := json.Unmarshal(req.EventJSON, &event); err != nil {
+		return err
+	}
+	subscriber, err := s.plugin.NewEventSubscriber(context.Background(), inst, secrets)
+	if err != nil {
+		return err
+	}
+	return subscriber.HandleEvent(context.Background(), event)
 }
 
 func (s *rpcServer) StorageKind(req InstancePayload, reply *StringReply) error {
@@ -311,6 +332,28 @@ func (s *rpcServer) StorageUpload(req StorageUploadRequest, reply *Empty) error 
 	source := &remoteUploadSource{client: rpc.NewClient(conn), broker: s.broker}
 	defer source.client.Close()
 	return uploadProvider.Upload(context.Background(), req.Path, source)
+}
+
+func (s *rpcServer) StorageResolvePlaybackURL(req StoragePlaybackURLRequest, reply *JSONReply) error {
+	provider, closeFn, err := s.storage(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	playbackProvider, ok := provider.(providers.PlaybackURLProvider)
+	if !ok {
+		return fmt.Errorf("插件未实现播放 URL")
+	}
+	result, err := playbackProvider.ResolvePlaybackURL(context.Background(), req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
 }
 
 func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, pluginsdk.SecretResolver, func(), error) {

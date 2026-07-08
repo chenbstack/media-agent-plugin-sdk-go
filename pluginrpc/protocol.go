@@ -104,6 +104,11 @@ type AuthCheckRequest struct {
 	SessionID string
 }
 
+type EventRequest struct {
+	Instance  InstancePayload
+	EventJSON []byte
+}
+
 type StoragePathRequest struct {
 	Instance InstancePayload
 	Path     string
@@ -119,6 +124,11 @@ type StorageUploadRequest struct {
 	Instance             InstancePayload
 	Path                 string
 	UploadSourceBrokerID uint32
+}
+
+type StoragePlaybackURLRequest struct {
+	Instance InstancePayload
+	Input    providers.PlaybackURLInput
 }
 
 func encodeJSON(value any) (JSONReply, error) {
@@ -358,6 +368,11 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	if out.HasCapability("storage") {
 		out.NewStorage = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.StorageProvider, error) {
 			return &storageProvider{external: e, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasCapability("event.subscribe") {
+		out.NewEventSubscriber = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.EventSubscriber, error) {
+			return &eventSubscriber{external: e, inst: inst, secrets: secrets}, nil
 		}
 	}
 	return out

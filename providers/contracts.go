@@ -77,6 +77,26 @@ type ServerSideCopyProvider interface {
 	Copy(ctx context.Context, oldname, newname string) error
 }
 
+// PlaybackURLInput 描述宿主播放网关请求某个存储文件的播放地址。
+// Provider 通常只需要 Path；Metadata 预留给 115 pickcode、123 s3 key 等原生文件标识。
+type PlaybackURLInput struct {
+	Path     string         `json:"path"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// PlaybackURLResult 是存储插件换取到的临时播放 URL。
+type PlaybackURLResult struct {
+	URL       string            `json:"url"`
+	ExpiresAt time.Time         `json:"expires_at,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+}
+
+// PlaybackURLProvider 是云盘等存储可选实现的播放 URL 解析能力。
+// 宿主播放网关调用它并把 URL 作为 302 Location 返回。
+type PlaybackURLProvider interface {
+	ResolvePlaybackURL(ctx context.Context, input PlaybackURLInput) (PlaybackURLResult, error)
+}
+
 // ---- 下载器 ----
 
 type DownloadState string
