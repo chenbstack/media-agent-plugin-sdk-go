@@ -157,6 +157,7 @@ type Plugin struct {
 	NewMediaServer     func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
 	NewMetadata        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
 	NewSite            func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
+	NewCookieSource    func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.CookieSourceProvider, error)
 	NewModel           func() providers.ModelProvider
 	NewEventSubscriber func(ctx context.Context, inst Instance, secrets SecretResolver) (EventSubscriber, error)
 
@@ -208,6 +209,16 @@ func (p Plugin) validate() error {
 func (p Plugin) HasCapability(domain string) bool {
 	for _, c := range p.Manifest.Capabilities {
 		if c == domain || len(c) > len(domain) && c[:len(domain)] == domain && c[len(domain)] == '.' {
+			return true
+		}
+	}
+	return false
+}
+
+// HasExactCapability 判断插件是否声明了某个完整 capability。
+func (p Plugin) HasExactCapability(capability string) bool {
+	for _, c := range p.Manifest.Capabilities {
+		if c == capability {
 			return true
 		}
 	}

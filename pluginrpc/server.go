@@ -130,6 +130,33 @@ func (s *rpcServer) HandleEvent(req EventRequest, reply *Empty) error {
 	return subscriber.HandleEvent(context.Background(), event)
 }
 
+func (s *rpcServer) CookieSourceTest(req InstancePayload, reply *Empty) error {
+	provider, closeFn, err := s.cookieSource(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return provider.TestConnection(context.Background())
+}
+
+func (s *rpcServer) CookieSourceSnapshot(req InstancePayload, reply *JSONReply) error {
+	provider, closeFn, err := s.cookieSource(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	snapshot, err := provider.Snapshot(context.Background())
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(snapshot)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) StorageKind(req InstancePayload, reply *StringReply) error {
 	provider, closeFn, err := s.storage(req)
 	if err != nil {
@@ -389,6 +416,22 @@ func (s *rpcServer) storage(payload InstancePayload) (providers.StorageProvider,
 		return nil, nil, err
 	}
 	provider, err := s.plugin.NewStorage(context.Background(), inst, secrets)
+	if err != nil {
+		closeFn()
+		return nil, nil, err
+	}
+	return provider, closeFn, nil
+}
+
+func (s *rpcServer) cookieSource(payload InstancePayload) (providers.CookieSourceProvider, func(), error) {
+	if s.plugin.NewCookieSource == nil {
+		return nil, nil, fmt.Errorf("插件未实现 CookieSourceProvider")
+	}
+	inst, secrets, closeFn, err := s.instance(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	provider, err := s.plugin.NewCookieSource(context.Background(), inst, secrets)
 	if err != nil {
 		closeFn()
 		return nil, nil, err

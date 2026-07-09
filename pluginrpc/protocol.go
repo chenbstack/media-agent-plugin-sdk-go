@@ -370,6 +370,11 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 			return &storageProvider{external: e, inst: inst, secrets: secrets}, nil
 		}
 	}
+	if out.HasExactCapability("cookie_source.fetch") {
+		out.NewCookieSource = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.CookieSourceProvider, error) {
+			return &cookieSourceProvider{external: e, inst: inst, secrets: secrets}, nil
+		}
+	}
 	if out.HasCapability("event.subscribe") {
 		out.NewEventSubscriber = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.EventSubscriber, error) {
 			return &eventSubscriber{external: e, inst: inst, secrets: secrets}, nil

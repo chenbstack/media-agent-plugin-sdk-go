@@ -116,6 +116,31 @@ func (c *Client) HandleEventContext(ctx context.Context, inst pluginsdk.Instance
 	return c.call(ctx, "Plugin.HandleEvent", EventRequest{Instance: payload, EventJSON: eventJSON}, &reply)
 }
 
+func (c *Client) CookieSourceTestContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) error {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return err
+	}
+	var reply Empty
+	return c.call(ctx, "Plugin.CookieSourceTest", payload, &reply)
+}
+
+func (c *Client) CookieSourceSnapshotContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.CookieSnapshot, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return providers.CookieSnapshot{}, err
+	}
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.CookieSourceSnapshot", payload, &reply); err != nil {
+		return providers.CookieSnapshot{}, err
+	}
+	var out providers.CookieSnapshot
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return providers.CookieSnapshot{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply any) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -165,6 +190,12 @@ type storageProvider struct {
 	secrets  pluginsdk.SecretResolver
 }
 
+type cookieSourceProvider struct {
+	external ExternalPlugin
+	inst     pluginsdk.Instance
+	secrets  pluginsdk.SecretResolver
+}
+
 type eventSubscriber struct {
 	external ExternalPlugin
 	inst     pluginsdk.Instance
@@ -175,6 +206,29 @@ func (s *eventSubscriber) HandleEvent(ctx context.Context, event pluginsdk.Event
 	return s.external.withClientOperation(ctx, "plugin.event.handle", func(c *Client) error {
 		return c.HandleEventContext(ctx, s.inst, s.secrets, event)
 	})
+}
+
+func (p *cookieSourceProvider) Kind() string {
+	return p.external.Manifest.ID
+}
+
+func (p *cookieSourceProvider) TestConnection(ctx context.Context) error {
+	return p.external.withClientOperation(ctx, "cookie_source.test", func(c *Client) error {
+		return c.CookieSourceTestContext(ctx, p.inst, p.secrets)
+	})
+}
+
+func (p *cookieSourceProvider) Snapshot(ctx context.Context) (providers.CookieSnapshot, error) {
+	var out providers.CookieSnapshot
+	err := p.external.withClientOperation(ctx, "cookie_source.fetch", func(c *Client) error {
+		got, err := c.CookieSourceSnapshotContext(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		out = got
+		return nil
+	})
+	return out, err
 }
 
 func (p *storageProvider) Kind() string {

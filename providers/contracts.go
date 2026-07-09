@@ -404,6 +404,37 @@ type ModelProvider interface {
 	CommandDisplay(model ModelConfig) string
 }
 
+// ---- Cookie 来源 ----
+
+// CookieSourceProvider 从 CookieCloud、浏览器导出或备份文件等来源返回结构化 Cookie。
+// 插件只负责读取和解析来源；站点账号新增/更新由宿主统一校验、写 secret 和审计。
+type CookieSourceProvider interface {
+	Kind() string
+	TestConnection(ctx context.Context) error
+	Snapshot(ctx context.Context) (CookieSnapshot, error)
+}
+
+type CookieSnapshot struct {
+	Source    string         `json:"source"`
+	FetchedAt time.Time      `json:"fetched_at"`
+	Domains   []CookieDomain `json:"domains"`
+}
+
+type CookieDomain struct {
+	Domain  string       `json:"domain"`
+	Cookies []HTTPCookie `json:"cookies"`
+}
+
+type HTTPCookie struct {
+	Name     string    `json:"name"`
+	Value    string    `json:"value"`
+	Domain   string    `json:"domain,omitempty"`
+	Path     string    `json:"path,omitempty"`
+	Expires  time.Time `json:"expires,omitempty"`
+	Secure   bool      `json:"secure,omitempty"`
+	HTTPOnly bool      `json:"http_only,omitempty"`
+}
+
 // SiteProfile 是站点账号的用户数据快照（NexusPHP 系站点通用字段）。
 // 体积字段单位 bytes；解析不到的字段保持零值。
 type SiteProfile struct {
