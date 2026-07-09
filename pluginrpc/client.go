@@ -34,6 +34,42 @@ func (c *Client) ConfigSchema() (pluginsdk.ConfigSchema, error) {
 	return out, nil
 }
 
+func (c *Client) InstallContext(ctx context.Context, component string) (pluginsdk.InstallResult, error) {
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.Install", InstallRequest{Component: component}, &reply); err != nil {
+		return pluginsdk.InstallResult{}, err
+	}
+	var out pluginsdk.InstallResult
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return pluginsdk.InstallResult{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) CheckInstallContext(ctx context.Context, component string) (pluginsdk.InstallResult, error) {
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.CheckInstall", InstallRequest{Component: component}, &reply); err != nil {
+		return pluginsdk.InstallResult{}, err
+	}
+	var out pluginsdk.InstallResult
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return pluginsdk.InstallResult{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) UninstallContext(ctx context.Context, component string) (pluginsdk.UninstallResult, error) {
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.Uninstall", InstallRequest{Component: component}, &reply); err != nil {
+		return pluginsdk.UninstallResult{}, err
+	}
+	var out pluginsdk.UninstallResult
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return pluginsdk.UninstallResult{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) ValidateConfig(config map[string]any) error {
 	return c.ValidateConfigContext(context.Background(), config)
 }
@@ -141,6 +177,31 @@ func (c *Client) CookieSourceSnapshotContext(ctx context.Context, inst pluginsdk
 	return out, nil
 }
 
+func (c *Client) RendererTestContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) error {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return err
+	}
+	var reply Empty
+	return c.call(ctx, "Plugin.RendererTest", payload, &reply)
+}
+
+func (c *Client) RendererRenderContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, req providers.RenderRequest) (providers.RenderResult, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return providers.RenderResult{}, err
+	}
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.RendererRender", RendererRenderRequest{Instance: payload, Request: req}, &reply); err != nil {
+		return providers.RenderResult{}, err
+	}
+	var out providers.RenderResult
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return providers.RenderResult{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply any) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -200,6 +261,35 @@ type eventSubscriber struct {
 	external ExternalPlugin
 	inst     pluginsdk.Instance
 	secrets  pluginsdk.SecretResolver
+}
+
+type rendererProvider struct {
+	external ExternalPlugin
+	inst     pluginsdk.Instance
+	secrets  pluginsdk.SecretResolver
+}
+
+func (p *rendererProvider) Kind() string {
+	return p.external.Manifest.ID
+}
+
+func (p *rendererProvider) TestConnection(ctx context.Context) error {
+	return p.external.withClientOperation(ctx, "renderer.test", func(c *Client) error {
+		return c.RendererTestContext(ctx, p.inst, p.secrets)
+	})
+}
+
+func (p *rendererProvider) Render(ctx context.Context, req providers.RenderRequest) (providers.RenderResult, error) {
+	var out providers.RenderResult
+	err := p.external.withClientOperation(ctx, "renderer.render", func(c *Client) error {
+		got, err := c.RendererRenderContext(ctx, p.inst, p.secrets, req)
+		if err != nil {
+			return err
+		}
+		out = got
+		return nil
+	})
+	return out, err
 }
 
 func (s *eventSubscriber) HandleEvent(ctx context.Context, event pluginsdk.EventEnvelope) error {

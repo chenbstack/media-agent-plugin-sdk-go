@@ -6,6 +6,7 @@ package pluginsdk
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -28,6 +29,53 @@ type Manifest struct {
 	Subscriptions []EventSubscription `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
 	Permissions   Permissions         `yaml:"permissions" json:"permissions"`
 	Resources     Resources           `yaml:"resources" json:"resources"`
+	Install       *InstallInfo        `yaml:"install,omitempty" json:"install,omitempty"`
+}
+
+// InstallInfo 是插件对其自举安装步骤（capability lifecycle.install）的自我描述。
+// 宿主不理解安装内容，安装区块的标题与说明都取自这里，而非宿主硬编码文案。
+//
+// 一个插件可声明多个可安装组件（Components，如浏览器仿真插件的"轻量引擎"与"隐身
+// Chromium"），各自独立安装/检查/卸载。为向后兼容，只有单个安装目标的插件可直接用
+// 顶层 Title/Description，宿主归一化为一个 id 为空串的默认组件（见 Manifest.InstallComponents）。
+type InstallInfo struct {
+	// Title 是（单组件插件的）安装区块标题（如"浏览器引擎"），由插件按其安装内容命名。
+	Title string `yaml:"title,omitempty" json:"title,omitempty"`
+	// Description 向用户说明这一步会做什么、为何需要；可含手动触发/重试的提示。
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// Components 声明多个可独立安装的组件；非空时忽略上面的单数 Title/Description。
+	Components []ComponentInfo `yaml:"components,omitempty" json:"components,omitempty"`
+}
+
+// ComponentInfo 是插件对某个可安装组件（资源）的自我描述。宿主原样展示其标题/说明，
+// 并按 ID 路由安装、检查、卸载；一个插件的多个组件互不影响。
+type ComponentInfo struct {
+	// ID 是组件稳定标识（安装/卸载/日志路由用）；默认组件用空串。
+	ID string `yaml:"id" json:"id"`
+	// Title 是该组件的安装区块标题（如"隐身 Chromium"）。
+	Title string `yaml:"title" json:"title"`
+	// Description 说明该组件会安装什么、为何需要。
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// Uninstallable 为 true 表示该组件的资源可被卸载（前端显示"卸载"按钮）。
+	Uninstallable bool `yaml:"uninstallable,omitempty" json:"uninstallable,omitempty"`
+	// AutoInstall 为 true 表示该组件在插件启用后由宿主自动预装（适合体积小、默认必需的资源，
+	// 如默认引擎）；为 false 则仅用户在详情页手动安装（适合体积大、按需启用的资源）。
+	AutoInstall bool `yaml:"auto_install,omitempty" json:"auto_install,omitempty"`
+}
+
+// InstallComponents 返回插件声明的可安装组件列表，已归一化：优先 install.components；
+// 否则若用了单数 install.title/description，归一为一个 id 为空串的默认组件；都没有则返回 nil。
+func (m Manifest) InstallComponents() []ComponentInfo {
+	if m.Install == nil {
+		return nil
+	}
+	if len(m.Install.Components) > 0 {
+		return m.Install.Components
+	}
+	if m.Install.Title != "" || m.Install.Description != "" {
+		return []ComponentInfo{{ID: "", Title: m.Install.Title, Description: m.Install.Description}}
+	}
+	return nil
 }
 
 type Permissions struct {
@@ -117,12 +165,13 @@ type KVStore interface {
 // Instance 是一个已校验的连接实例配置（downloaders/media_servers 表中的一行）。
 // Config 中 secret 字段的值是 secrets 表引用，需通过 SecretResolver 解密。
 type Instance struct {
-	ID     string
-	Name   string
-	Config map[string]any
-	KV     KVStore
-	DB     PluginDB
-	Logger Logger
+	ID       string
+	Name     string
+	Config   map[string]any
+	KV       KVStore
+	DB       PluginDB
+	Logger   Logger
+	Settings Settings
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。
@@ -143,6 +192,17 @@ type AuthCheckResult struct {
 	Config  map[string]any `json:"config,omitempty"`
 }
 
+// InstallResult 是插件自举安装（Install）或安装检查（CheckInstall）的结果。
+// 宿主只负责触发和记录，不理解安装内容。
+type InstallResult struct {
+	// 对 Install：Installed 为 true 表示本次真正执行了安装（如下载了引擎二进制），
+	// 为 false 表示调用前已就绪、本次未执行安装动作。
+	// 对 CheckInstall：Installed 为 true 表示插件已安装就绪，false 表示尚未安装。
+	Installed bool `json:"installed"`
+	// Message 是可读的安装结果，宿主写入安装状态并展示给用户。
+	Message string `json:"message,omitempty"`
+}
+
 // Plugin 是注册到内核的插件描述。官方插件在编译期构造；
 // 将来第三方 CLI 插件由宿主解析 `plugin manifest` / `plugin config-schema` 输出后构造。
 type Plugin struct {
@@ -160,6 +220,9 @@ type Plugin struct {
 	NewCookieSource    func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.CookieSourceProvider, error)
 	NewModel           func() providers.ModelProvider
 	NewEventSubscriber func(ctx context.Context, inst Instance, secrets SecretResolver) (EventSubscriber, error)
+	NewNotifier        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.NotifierProvider, error)
+	NewSubtitleSource  func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SubtitleSourceProvider, error)
+	NewRenderer        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.RendererProvider, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。
@@ -176,6 +239,70 @@ type Plugin struct {
 	// ConfigSchemaForConfig 根据当前配置返回有效 schema。用于字段集合需要依赖
 	// 其他字段或资源包的插件；nil 表示始终使用 ConfigSchema。
 	ConfigSchemaForConfig func(config map[string]any) ConfigSchema
+
+	// Install 是插件自举安装钩子（capability lifecycle.install）。用于插件下载运行所需
+	// 的外部资源（如浏览器引擎二进制）。宿主只负责触发、记录状态并向用户展示进度，不
+	// 理解安装内容；安装逻辑在插件进程内运行，使用插件进程自身的网络与文件权限。
+	//
+	// progress 是进度接收器：插件应把可读的进度按行写入（每行一条），宿主实时转发给
+	// 前端展示。对外部插件，插件进程写到自己的 stderr 即等价于写入 progress。
+	//
+	// 插件必须幂等：已就绪时快速返回 InstallResult{Installed: false} 且不产生副作用；
+	// 安装失败后可被反复调用，插件需自行清理半成品（如临时下载文件）。nil 表示插件无
+	// 需安装步骤。
+	Install func(ctx context.Context, progress io.Writer) (InstallResult, error)
+
+	// CheckInstall 查询插件是否已安装就绪，只读、无副作用、不触发下载。宿主在插件加载时
+	// 调用它决定初始安装状态（installed / pending），避免每次启动都执行安装动作。声明了
+	// lifecycle.install 的插件应实现它；nil 时宿主退化为把状态标记为 pending。
+	CheckInstall func(ctx context.Context) (InstallResult, error)
+
+	// Uninstall 卸载 Install 下载的资源（如引擎二进制），回收磁盘空间。宿主在用户手动
+	// 卸载、或停用插件时调用；同 Install 一样只转发、记录状态并展示进度（progress 按行
+	// 写入）。必须幂等：无资源可卸时返回 UninstallResult{Removed: false}。nil 表示插件
+	// 无可卸载资源。
+	//
+	// 上面的 Install/CheckInstall/Uninstall 对应"默认组件"（id 为空串）。声明了多个可安装
+	// 组件的插件（见 Manifest.Install.Components）把额外组件的钩子放进 InstallComponents，
+	// 按 ID 路由；宿主用 InstallHooks(id) 统一取用。
+	Uninstall func(ctx context.Context, progress io.Writer) (UninstallResult, error)
+
+	// InstallComponents 是"非默认组件"的安装钩子集合，按 ID 匹配 Manifest.Install.Components。
+	InstallComponents []InstallComponent
+}
+
+// InstallComponent 是单个可安装组件的运行时钩子集合，语义同 Plugin.Install/CheckInstall/
+// Uninstall，但作用于指定 ID 的组件。Uninstall 为 nil 表示该组件资源不可卸载。
+type InstallComponent struct {
+	ID           string
+	Install      func(ctx context.Context, progress io.Writer) (InstallResult, error)
+	CheckInstall func(ctx context.Context) (InstallResult, error)
+	Uninstall    func(ctx context.Context, progress io.Writer) (UninstallResult, error)
+}
+
+// InstallHooks 返回给定组件 ID 的安装钩子；空 ID 命中默认（Install/CheckInstall/Uninstall）。
+// ok 为 false 表示该组件不存在或未提供任何钩子。
+func (p Plugin) InstallHooks(component string) (InstallComponent, bool) {
+	if component == "" {
+		if p.Install == nil && p.CheckInstall == nil && p.Uninstall == nil {
+			return InstallComponent{}, false
+		}
+		return InstallComponent{ID: "", Install: p.Install, CheckInstall: p.CheckInstall, Uninstall: p.Uninstall}, true
+	}
+	for _, c := range p.InstallComponents {
+		if c.ID == component {
+			return c, true
+		}
+	}
+	return InstallComponent{}, false
+}
+
+// UninstallResult 是插件卸载下载资源（Uninstall）的结果。
+type UninstallResult struct {
+	// Removed 为 true 表示本次真正删除了资源；false 表示调用前已无资源可卸。
+	Removed bool `json:"removed"`
+	// Message 是可读的卸载结果，宿主写入状态并展示给用户。
+	Message string `json:"message,omitempty"`
 }
 
 func (p Plugin) validate() error {

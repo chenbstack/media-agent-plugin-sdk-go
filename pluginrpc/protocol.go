@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/rpc"
+	"os"
 	"os/exec"
 	"time"
 
@@ -88,6 +89,11 @@ type ConfigRequest struct {
 	HostServicesBrokerID uint32
 }
 
+// InstallRequest 指定要安装/检查/卸载的组件；Component 为空串表示默认组件。
+type InstallRequest struct {
+	Component string
+}
+
 type FieldOptionsRequest struct {
 	Instance InstancePayload
 	Field    string
@@ -129,6 +135,11 @@ type StorageUploadRequest struct {
 type StoragePlaybackURLRequest struct {
 	Instance InstancePayload
 	Input    providers.PlaybackURLInput
+}
+
+type RendererRenderRequest struct {
+	Instance InstancePayload
+	Request  providers.RenderRequest
 }
 
 func encodeJSON(value any) (JSONReply, error) {
@@ -177,6 +188,8 @@ type ClientConfig struct {
 	ScopeType         string
 	ScopeID           string
 	Operation         string
+	// Env 是本次操作追加到子进程环境的额外变量（key=value）；空则仅继承宿主环境。
+	Env               []string
 	ProcessObserver   ProcessObserver
 	PermissionChecker PermissionChecker
 	Credentials       *ProcessCredentials
@@ -224,6 +237,10 @@ func startClient(ctx context.Context, cfg ClientConfig) (*runningClient, error) 
 	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 	if cfg.Dir != "" {
 		cmd.Dir = cfg.Dir
+	}
+	// 默认继承宿主进程环境；cfg.Env 为该操作追加的额外变量（如引擎下载代理）。
+	if len(cfg.Env) > 0 {
+		cmd.Env = append(os.Environ(), cfg.Env...)
 	}
 	if err := applyProcessCredentials(cmd, cfg.Credentials); err != nil {
 		return nil, err
@@ -297,6 +314,10 @@ func withClient(ctx context.Context, cfg ClientConfig, fn func(*Client) error) e
 	return fn(running.client)
 }
 
+// OperationInstall 是自举安装（下载引擎等资源）的操作名。宿主可据此只对安装子进程
+// 注入下载代理等环境变量，避免影响渲染等其他操作的子进程。
+const OperationInstall = "plugin.install"
+
 type ExternalPlugin struct {
 	Manifest          pluginsdk.Manifest
 	ConfigSchema      pluginsdk.ConfigSchema
@@ -308,9 +329,24 @@ type ExternalPlugin struct {
 	PermissionChecker PermissionChecker
 	ProcessObserver   ProcessObserver
 	Credentials       *ProcessCredentials
+	// Env 按操作名返回追加到子进程环境的额外变量（key=value）。可为 nil。
+	// 宿主用它把全局网络代理等注入到特定操作（如 OperationInstall 的引擎下载）。
+	Env func(operation string) []string
+}
+
+// envFor 返回某操作要追加的环境变量；Env 未设置时为 nil。
+func (e ExternalPlugin) envFor(operation string) []string {
+	if e.Env == nil {
+		return nil
+	}
+	return e.Env(operation)
 }
 
 const externalPluginAuthTimeout = 45 * time.Second
+
+// externalPluginInstallTimeout 给插件自举安装留足时间：安装可能下载较大的
+// 引擎二进制（浏览器仿真插件下载 Lightpanda/Obscura 数十 MB）。
+const externalPluginInstallTimeout = 10 * time.Minute
 
 func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	out := pluginsdk.Plugin{
@@ -380,7 +416,77 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 			return &eventSubscriber{external: e, inst: inst, secrets: secrets}, nil
 		}
 	}
+	if out.HasCapability("renderer") {
+		out.NewRenderer = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.RendererProvider, error) {
+			return &rendererProvider{external: e, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasExactCapability("lifecycle.install") {
+		// 默认组件（id 为空串）→ out.Install/CheckInstall/Uninstall；manifest 声明的其余
+		// 组件 → out.InstallComponents。转发时把组件 id 透传给插件进程，由其按 id 路由。
+		def := e.installForwarders("")
+		out.Install = def.Install
+		out.CheckInstall = def.CheckInstall
+		out.Uninstall = def.Uninstall
+		for _, comp := range e.Manifest.InstallComponents() {
+			if comp.ID == "" {
+				continue
+			}
+			out.InstallComponents = append(out.InstallComponents, e.installForwarders(comp.ID))
+		}
+	}
 	return out
+}
+
+// installForwarders 构造某个组件的安装/检查/卸载 RPC 转发闭包，component 透传给插件进程。
+func (e ExternalPlugin) installForwarders(component string) pluginsdk.InstallComponent {
+	return pluginsdk.InstallComponent{
+		ID: component,
+		Install: func(ctx context.Context, progress io.Writer) (pluginsdk.InstallResult, error) {
+			var result pluginsdk.InstallResult
+			callCtx, cancel := contextWithTimeout(ctx, externalPluginInstallTimeout)
+			defer cancel()
+			// 把 progress 叠加到该次安装进程的 stderr 上：插件进程写 stderr 的进度行经
+			// go-plugin SyncStderr 实时流回 progress，宿主据此向前端展示实时进度。
+			err := e.withClientOperationStderr(callCtx, "plugin.install", progress, func(c *Client) error {
+				got, err := c.InstallContext(callCtx, component)
+				if err != nil {
+					return err
+				}
+				result = got
+				return nil
+			})
+			return result, err
+		},
+		CheckInstall: func(ctx context.Context) (pluginsdk.InstallResult, error) {
+			var result pluginsdk.InstallResult
+			callCtx, cancel := contextWithTimeout(ctx, externalPluginAuthTimeout)
+			defer cancel()
+			err := e.withClientOperation(callCtx, "plugin.check_install", func(c *Client) error {
+				got, err := c.CheckInstallContext(callCtx, component)
+				if err != nil {
+					return err
+				}
+				result = got
+				return nil
+			})
+			return result, err
+		},
+		Uninstall: func(ctx context.Context, progress io.Writer) (pluginsdk.UninstallResult, error) {
+			var result pluginsdk.UninstallResult
+			callCtx, cancel := contextWithTimeout(ctx, externalPluginInstallTimeout)
+			defer cancel()
+			err := e.withClientOperationStderr(callCtx, "plugin.uninstall", progress, func(c *Client) error {
+				got, err := c.UninstallContext(callCtx, component)
+				if err != nil {
+					return err
+				}
+				result = got
+				return nil
+			})
+			return result, err
+		},
+	}
 }
 
 func contextWithTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
@@ -398,6 +504,34 @@ func (e ExternalPlugin) withClientOperation(ctx context.Context, operation strin
 	return e.withClientForScopeOperation(ctx, "plugin", "global", operation, fn)
 }
 
+// withClientOperationStderr 同 withClientOperation，但把 extraStderr 叠加到该次插件
+// 进程的 stderr 上（用于实时接收安装进度）。extraStderr 为 nil 时退化为普通调用。
+func (e ExternalPlugin) withClientOperationStderr(ctx context.Context, operation string, extraStderr io.Writer, fn func(*Client) error) error {
+	stderr := e.Stderr
+	if extraStderr != nil {
+		if stderr != nil {
+			stderr = io.MultiWriter(stderr, extraStderr)
+		} else {
+			stderr = extraStderr
+		}
+	}
+	return withClient(ctx, ClientConfig{
+		Command:           e.Command,
+		Args:              e.Args,
+		Dir:               e.Dir,
+		Stderr:            stderr,
+		Manifest:          e.Manifest,
+		Permissions:       e.Manifest.Permissions,
+		ScopeType:         "plugin",
+		ScopeID:           "global",
+		Operation:         operation,
+		Env:               e.envFor(operation),
+		ProcessObserver:   e.ProcessObserver,
+		PermissionChecker: e.PermissionChecker,
+		Credentials:       e.Credentials,
+	}, fn)
+}
+
 func (e ExternalPlugin) withClientForScope(ctx context.Context, scopeType, scopeID string, fn func(*Client) error) error {
 	return e.withClientForScopeOperation(ctx, scopeType, scopeID, "plugin.rpc", fn)
 }
@@ -413,6 +547,7 @@ func (e ExternalPlugin) withClientForScopeOperation(ctx context.Context, scopeTy
 		ScopeType:         scopeType,
 		ScopeID:           scopeID,
 		Operation:         operation,
+		Env:               e.envFor(operation),
 		ProcessObserver:   e.ProcessObserver,
 		PermissionChecker: e.PermissionChecker,
 		Credentials:       e.Credentials,
@@ -438,6 +573,7 @@ func (e ExternalPlugin) startClientForScopeOperation(ctx context.Context, scopeT
 		ScopeType:         scopeType,
 		ScopeID:           scopeID,
 		Operation:         operation,
+		Env:               e.envFor(operation),
 		ProcessObserver:   e.ProcessObserver,
 		PermissionChecker: e.PermissionChecker,
 		Credentials:       e.Credentials,

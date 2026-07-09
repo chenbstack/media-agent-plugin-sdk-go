@@ -510,3 +510,96 @@ type SiteProvider interface {
 	// Search 按关键词搜索种子并归一化；站点无搜索规则时返回错误。
 	Search(ctx context.Context, req TorrentSearchRequest) ([]TorrentResult, error)
 }
+
+// ---- 通知渠道（docs/notification-system.md §3）----
+
+// NotificationMessage 是发往外部渠道的一条通知。文案由宿主模板渲染完成，
+// 插件只负责按渠道协议投递，不参与内容组装。
+type NotificationMessage struct {
+	Title       string            `json:"title"`
+	Body        string            `json:"body"`
+	Severity    string            `json:"severity,omitempty"` // info / success / warning / critical / action
+	Category    string            `json:"category,omitempty"`
+	ActionLabel string            `json:"action_label,omitempty"`
+	ActionURL   string            `json:"action_url,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// NotifierProvider 屏蔽钉钉、Telegram、邮件、Webhook 等外部通知渠道差异。
+// 站内通知永远由宿主直接写库，不经过该接口。
+type NotifierProvider interface {
+	Kind() string
+	TestConnection(ctx context.Context) error
+	Send(ctx context.Context, msg NotificationMessage) error
+}
+
+// ---- 字幕来源 ----
+
+// SubtitleSearchRequest 描述为单个视频文件搜索字幕所需的上下文。
+// 识别信息可能不完整；插件按可用字段搜索，缺关键字段时返回空结果，不算错误。
+type SubtitleSearchRequest struct {
+	MediaType     string   `json:"media_type,omitempty"` // movie / series
+	Title         string   `json:"title,omitempty"`
+	OriginalTitle string   `json:"original_title,omitempty"`
+	Year          int      `json:"year,omitempty"`
+	SeasonNumber  int      `json:"season_number,omitempty"`
+	EpisodeNumber int      `json:"episode_number,omitempty"`
+	IMDBID        string   `json:"imdb_id,omitempty"`
+	TMDBID        int64    `json:"tmdb_id,omitempty"`
+	FileName      string   `json:"file_name,omitempty"` // 目标视频文件名，用于按命名匹配
+	Languages     []string `json:"languages,omitempty"` // 期望语言优先级，如 ["zh", "en"]
+	// Context 是来源相关的透传信息，如 PT 站字幕插件需要的
+	// site_account_id 和 detail_url；由宿主按下载任务来源填充。
+	Context map[string]string `json:"context,omitempty"`
+}
+
+// SubtitleResult 是归一化的候选字幕。
+type SubtitleResult struct {
+	Provider    string            `json:"provider"` // 插件 id
+	Name        string            `json:"name"`
+	Language    string            `json:"language,omitempty"`
+	Format      string            `json:"format,omitempty"` // srt / ass / sup ...
+	SizeBytes   int64             `json:"size_bytes,omitempty"`
+	Score       float64           `json:"score,omitempty"` // 来源侧匹配度 0-1；宿主还会做文件级匹配
+	DownloadURL string            `json:"download_url,omitempty"`
+	Ref         map[string]string `json:"ref,omitempty"` // 插件私有的下载定位信息（如 file_id）
+}
+
+// SubtitleSourceProvider 屏蔽 PT 站附件、OpenSubtitles 等字幕来源差异。
+// 宿主负责候选与视频文件的匹配、解压和落盘；插件只负责搜索与取回原始字幕内容。
+type SubtitleSourceProvider interface {
+	Kind() string
+	TestConnection(ctx context.Context) error
+	Search(ctx context.Context, req SubtitleSearchRequest) ([]SubtitleResult, error)
+	Download(ctx context.Context, result SubtitleResult) ([]byte, error)
+}
+
+// ---- 浏览器渲染（站点反爬挑战兜底）----
+
+// RenderRequest 是一次页面渲染请求。宿主在直接 HTTP 命中 Cloudflare /
+// DDoS-GUARD 等反爬挑战时调用，用真实浏览器环境取回页面。
+type RenderRequest struct {
+	URL            string            `json:"url"`
+	UserAgent      string            `json:"user_agent,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	Cookies        []HTTPCookie      `json:"cookies,omitempty"`
+	WaitUntil      string            `json:"wait_until,omitempty"`    // load / domcontentloaded / networkidle
+	WaitSelector   string            `json:"wait_selector,omitempty"` // 可选：等待选择器出现后再取快照
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
+}
+
+// RenderResult 是渲染完成后的页面快照。Cookies 返回渲染后的完整 cookie，
+// 供宿主回写站点账号（如 Cloudflare 通过后的 cf_clearance）。
+type RenderResult struct {
+	HTML     string       `json:"html"`
+	FinalURL string       `json:"final_url,omitempty"`
+	Status   int          `json:"status,omitempty"`
+	Cookies  []HTTPCookie `json:"cookies,omitempty"`
+}
+
+// RendererProvider 屏蔽 Playwright、Lightpanda 等浏览器仿真后端差异。
+type RendererProvider interface {
+	Kind() string
+	TestConnection(ctx context.Context) error
+	Render(ctx context.Context, req RenderRequest) (RenderResult, error)
+}

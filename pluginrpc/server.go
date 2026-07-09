@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/rpc"
+	"os"
 
 	hcplugin "github.com/hashicorp/go-plugin"
 
@@ -29,6 +30,60 @@ func (s *rpcServer) Manifest(args Empty, reply *JSONReply) error {
 
 func (s *rpcServer) ConfigSchema(args Empty, reply *JSONReply) error {
 	out, err := encodeJSON(s.plugin.ConfigSchema)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *rpcServer) Install(req InstallRequest, reply *JSONReply) error {
+	hooks, ok := s.plugin.InstallHooks(req.Component)
+	if !ok || hooks.Install == nil {
+		return fmt.Errorf("插件未实现组件 %q 的安装步骤", req.Component)
+	}
+	// 进度写到插件进程自身的 stderr；go-plugin 经 SyncStderr 实时转发给宿主，
+	// 宿主再喂给前端展示。这样单次阻塞 RPC 也能呈现实时进度。
+	result, err := hooks.Install(context.Background(), os.Stderr)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *rpcServer) CheckInstall(req InstallRequest, reply *JSONReply) error {
+	hooks, ok := s.plugin.InstallHooks(req.Component)
+	if !ok || hooks.CheckInstall == nil {
+		return fmt.Errorf("插件未实现组件 %q 的安装检查", req.Component)
+	}
+	result, err := hooks.CheckInstall(context.Background())
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *rpcServer) Uninstall(req InstallRequest, reply *JSONReply) error {
+	hooks, ok := s.plugin.InstallHooks(req.Component)
+	if !ok || hooks.Uninstall == nil {
+		return fmt.Errorf("插件未实现组件 %q 的资源卸载", req.Component)
+	}
+	// 卸载进度同安装：写插件进程 stderr，go-plugin 实时转发给宿主。
+	result, err := hooks.Uninstall(context.Background(), os.Stderr)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
 	if err != nil {
 		return err
 	}
@@ -128,6 +183,33 @@ func (s *rpcServer) HandleEvent(req EventRequest, reply *Empty) error {
 		return err
 	}
 	return subscriber.HandleEvent(context.Background(), event)
+}
+
+func (s *rpcServer) RendererTest(req InstancePayload, reply *Empty) error {
+	provider, closeFn, err := s.renderer(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return provider.TestConnection(context.Background())
+}
+
+func (s *rpcServer) RendererRender(req RendererRenderRequest, reply *JSONReply) error {
+	provider, closeFn, err := s.renderer(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	result, err := provider.Render(context.Background(), req.Request)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
 }
 
 func (s *rpcServer) CookieSourceTest(req InstancePayload, reply *Empty) error {
@@ -416,6 +498,22 @@ func (s *rpcServer) storage(payload InstancePayload) (providers.StorageProvider,
 		return nil, nil, err
 	}
 	provider, err := s.plugin.NewStorage(context.Background(), inst, secrets)
+	if err != nil {
+		closeFn()
+		return nil, nil, err
+	}
+	return provider, closeFn, nil
+}
+
+func (s *rpcServer) renderer(payload InstancePayload) (providers.RendererProvider, func(), error) {
+	if s.plugin.NewRenderer == nil {
+		return nil, nil, fmt.Errorf("插件未实现 RendererProvider")
+	}
+	inst, secrets, closeFn, err := s.instance(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	provider, err := s.plugin.NewRenderer(context.Background(), inst, secrets)
 	if err != nil {
 		closeFn()
 		return nil, nil, err
