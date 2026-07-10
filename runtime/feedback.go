@@ -23,6 +23,10 @@ const (
 
 type Feedback interface {
 	Log(ctx context.Context, level LogLevel, message string, attrs ...any)
+	Debug(ctx context.Context, message string, attrs ...any)
+	Info(ctx context.Context, message string, attrs ...any)
+	Warn(ctx context.Context, message string, attrs ...any)
+	Error(ctx context.Context, message string, attrs ...any)
 	Toast(ctx context.Context, input ToastInput) error
 	Notify(ctx context.Context, input NotificationInput) error
 }

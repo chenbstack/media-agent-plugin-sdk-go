@@ -12,6 +12,7 @@ import (
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go"
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
+	runtimesdk "github.com/chenbstack/media-agent-plugin-sdk-go/runtime"
 )
 
 type rpcServer struct {
@@ -512,6 +513,7 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		inst.KV = services
 		inst.DB = services
 		inst.Logger = services
+		inst.Runtime = &runtimesdk.Services{Feedback: &runtimeFeedbackClient{host: services}}
 		inst.SiteAccounts = services
 		inst.Subscriptions = services
 		inst.Downloads = services

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go"
+	runtimesdk "github.com/chenbstack/media-agent-plugin-sdk-go/runtime"
 )
 
 type hostServicesServer struct {
@@ -684,6 +685,32 @@ func (c *hostServicesClient) Warn(ctx context.Context, message string, attrs ...
 
 func (c *hostServicesClient) Error(ctx context.Context, message string, attrs ...any) {
 	c.Log(ctx, pluginsdk.LogLevelError, message, attrs...)
+}
+
+// runtimeFeedbackClient adapts the Runtime SDK feedback levels to the legacy
+// logger RPC while keeping Toast and Notify on the same host-services channel.
+type runtimeFeedbackClient struct{ host *hostServicesClient }
+
+func (c *runtimeFeedbackClient) Log(ctx context.Context, level runtimesdk.LogLevel, message string, attrs ...any) {
+	c.host.Log(ctx, pluginsdk.LogLevel(level), message, attrs...)
+}
+func (c *runtimeFeedbackClient) Debug(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogDebug, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Info(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogInfo, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Warn(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogWarn, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Error(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogError, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Toast(context.Context, runtimesdk.ToastInput) error {
+	return fmt.Errorf("宿主尚未提供 Toast 能力")
+}
+func (c *runtimeFeedbackClient) Notify(context.Context, runtimesdk.NotificationInput) error {
+	return fmt.Errorf("宿主尚未提供通知能力")
 }
 
 func logAttrs(attrs []any) []LogAttr {

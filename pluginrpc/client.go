@@ -245,7 +245,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 		Name:       inst.Name,
 		ConfigJSON: configJSON,
 	}
-	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.SiteAccounts != nil ||
+	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil || inst.SiteAccounts != nil ||
 		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil {
 		id := c.broker.NextId()
 		payload.HostServicesBrokerID = id
