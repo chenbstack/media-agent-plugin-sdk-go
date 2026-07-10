@@ -14,11 +14,25 @@ import (
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
 
+const (
+	CategorySiteMetadata = "site-metadata"
+	CategoryDownloader   = "downloader"
+	CategoryMediaServer  = "media-server"
+	CategoryStorage      = "storage"
+	CategorySubtitle     = "subtitle"
+	CategoryNotification = "notification"
+	CategoryAIModel      = "ai-model"
+	CategoryAutomation   = "automation"
+	CategoryOther        = "other"
+)
+
 type Manifest struct {
 	ID            string              `yaml:"id" json:"id"`
 	Name          string              `yaml:"name" json:"name"`
 	Version       string              `yaml:"version" json:"version"`
 	Description   string              `yaml:"description" json:"description,omitempty"`
+	Category      string              `yaml:"category,omitempty" json:"category,omitempty"`
+	Tags          []string            `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Type          string              `yaml:"type" json:"type"` // builtin / cli / rule / ui
 	Entry         map[string]string   `yaml:"entry,omitempty" json:"entry,omitempty"`
 	Protocol      string              `yaml:"protocol,omitempty" json:"protocol,omitempty"`
