@@ -152,6 +152,26 @@ func (c *Client) HandleEventContext(ctx context.Context, inst pluginsdk.Instance
 	return c.call(ctx, "Plugin.HandleEvent", EventRequest{Instance: payload, EventJSON: eventJSON}, &reply)
 }
 
+func (c *Client) RunActionContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, actionID string, input map[string]any) (pluginsdk.ActionResult, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.ActionResult{}, err
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return pluginsdk.ActionResult{}, err
+	}
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.RunAction", ActionRunRequest{Instance: payload, ActionID: actionID, InputJSON: inputJSON}, &reply); err != nil {
+		return pluginsdk.ActionResult{}, err
+	}
+	var result pluginsdk.ActionResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.ActionResult{}, err
+	}
+	return result, nil
+}
+
 func (c *Client) CookieSourceTestContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) error {
 	payload, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
@@ -225,7 +245,8 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 		Name:       inst.Name,
 		ConfigJSON: configJSON,
 	}
-	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil {
+	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.SiteAccounts != nil ||
+		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil {
 		id := c.broker.NextId()
 		payload.HostServicesBrokerID = id
 		go c.broker.AcceptAndServe(id, &hostServicesServer{
@@ -240,6 +261,10 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			kv:                inst.KV,
 			db:                inst.DB,
 			logger:            inst.Logger,
+			siteAccounts:      inst.SiteAccounts,
+			subscriptions:     inst.Subscriptions,
+			downloads:         inst.Downloads,
+			transfers:         inst.Transfers,
 		})
 	}
 	return payload, nil
@@ -261,6 +286,27 @@ type eventSubscriber struct {
 	external ExternalPlugin
 	inst     pluginsdk.Instance
 	secrets  pluginsdk.SecretResolver
+}
+
+type actionHandler struct {
+	external ExternalPlugin
+	inst     pluginsdk.Instance
+	secrets  pluginsdk.SecretResolver
+}
+
+func (h *actionHandler) RunAction(ctx context.Context, actionID string, input map[string]any) (pluginsdk.ActionResult, error) {
+	var result pluginsdk.ActionResult
+	callCtx, cancel := contextWithTimeout(ctx, externalPluginActionTimeout)
+	defer cancel()
+	err := h.external.withClientOperation(callCtx, "plugin.action."+actionID, func(c *Client) error {
+		got, err := c.RunActionContext(callCtx, h.inst, h.secrets, actionID, input)
+		if err != nil {
+			return err
+		}
+		result = got
+		return nil
+	})
+	return result, err
 }
 
 type rendererProvider struct {

@@ -91,6 +91,17 @@ capabilities: [storage.path]
 	}
 }
 
+func TestManifestRejectsDuplicateActions(t *testing.T) {
+	p := Plugin{Manifest: Manifest{
+		ID: "automation", Name: "Automation", Version: "1", Type: "cli",
+		Capabilities: []string{"action.run"}, Resources: Resources{MemoryLimitMB: 16},
+		Actions: []ActionDefinition{{ID: "sync", Name: "同步"}, {ID: "sync", Name: "再次同步"}},
+	}}
+	if err := p.validate(); err == nil {
+		t.Fatal("expected duplicate action validation error")
+	}
+}
+
 func TestRegistry(t *testing.T) {
 	r := NewRegistry()
 	p := Plugin{Manifest: Manifest{

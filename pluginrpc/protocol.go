@@ -115,6 +115,12 @@ type EventRequest struct {
 	EventJSON []byte
 }
 
+type ActionRunRequest struct {
+	Instance  InstancePayload
+	ActionID  string
+	InputJSON []byte
+}
+
 type StoragePathRequest struct {
 	Instance InstancePayload
 	Path     string
@@ -343,6 +349,7 @@ func (e ExternalPlugin) envFor(operation string) []string {
 }
 
 const externalPluginAuthTimeout = 45 * time.Second
+const externalPluginActionTimeout = 30 * time.Minute
 
 // externalPluginInstallTimeout 给插件自举安装留足时间：安装可能下载较大的
 // 引擎二进制（浏览器仿真插件下载 Lightpanda/Obscura 数十 MB）。
@@ -419,6 +426,11 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	if out.HasCapability("renderer") {
 		out.NewRenderer = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.RendererProvider, error) {
 			return &rendererProvider{external: e, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasExactCapability("action.run") && len(out.Manifest.Actions) > 0 {
+		out.NewActionHandler = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.ActionHandler, error) {
+			return &actionHandler{external: e, inst: inst, secrets: secrets}, nil
 		}
 	}
 	if out.HasExactCapability("lifecycle.install") {
