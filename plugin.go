@@ -191,6 +191,7 @@ type Instance struct {
 	Subscriptions Subscriptions
 	Downloads     Downloads
 	Transfers     Transfers
+	Rules         Rules
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。

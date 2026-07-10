@@ -73,12 +73,13 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 		subscriptions: memorySubscriptions{},
 		downloads:     memoryDownloads{},
 		transfers:     memoryTransfers{},
+		rules:         memoryRules{},
 	}
 	var writeReply JSONReply
 	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &writeReply); err == nil {
 		t.Fatal("expected subscription write without host permission to fail")
 	}
-	server.permissions.Host = []string{"subscriptions.write", "downloads.read", "downloads.write", "transfers.write"}
+	server.permissions.Host = []string{"subscriptions.write", "downloads.read", "downloads.write", "transfers.write", "rules.read", "rules.write"}
 	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &writeReply); err != nil {
 		t.Fatalf("UpsertSubscription with permission: %v", err)
 	}
@@ -94,6 +95,18 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 	}
 	if err := server.UpsertTransfer(TransferUpsertRequest{}, &writeReply); err != nil {
 		t.Fatalf("UpsertTransfer with permission: %v", err)
+	}
+	if err := server.GetRuleCatalog(Empty{}, &writeReply); err != nil {
+		t.Fatalf("GetRuleCatalog with permission: %v", err)
+	}
+	if err := server.UpsertRuleProfile(RuleProfileUpsertRequest{}, &writeReply); err != nil {
+		t.Fatalf("UpsertRuleProfile with permission: %v", err)
+	}
+	if err := server.SetRuleSort(RuleSortSetRequest{}, &writeReply); err != nil {
+		t.Fatalf("SetRuleSort with permission: %v", err)
+	}
+	if err := server.SetRuleDefault(RuleDefaultSetRequest{}, &writeReply); err != nil {
+		t.Fatalf("SetRuleDefault with permission: %v", err)
 	}
 }
 
@@ -191,4 +204,22 @@ type memoryTransfers struct{}
 
 func (memoryTransfers) UpsertTransfer(context.Context, pluginsdk.TransferWrite) (pluginsdk.HostWriteResult, error) {
 	return pluginsdk.HostWriteResult{TargetID: "transfer-1", Change: "created"}, nil
+}
+
+type memoryRules struct{}
+
+func (memoryRules) GetRuleCatalog(context.Context) (pluginsdk.RuleCatalog, error) {
+	return pluginsdk.RuleCatalog{}, nil
+}
+
+func (memoryRules) UpsertRuleProfile(context.Context, pluginsdk.RuleProfileWrite) (pluginsdk.HostWriteResult, error) {
+	return pluginsdk.HostWriteResult{TargetID: "rule-1", Change: "created"}, nil
+}
+
+func (memoryRules) SetRuleSort(context.Context, pluginsdk.RuleSortWrite) (pluginsdk.RuleSortResult, error) {
+	return pluginsdk.RuleSortResult{}, nil
+}
+
+func (memoryRules) SetRuleDefault(context.Context, pluginsdk.RuleDefaultWrite) (pluginsdk.RuleDefaultResult, error) {
+	return pluginsdk.RuleDefaultResult{}, nil
 }

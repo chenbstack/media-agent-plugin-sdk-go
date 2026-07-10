@@ -28,6 +28,7 @@ type hostServicesServer struct {
 	subscriptions     pluginsdk.Subscriptions
 	downloads         pluginsdk.Downloads
 	transfers         pluginsdk.Transfers
+	rules             pluginsdk.Rules
 }
 
 type RevealRequest struct {
@@ -196,6 +197,18 @@ type TransferUpsertRequest struct {
 	Input pluginsdk.TransferWrite
 }
 
+type RuleProfileUpsertRequest struct {
+	Input pluginsdk.RuleProfileWrite
+}
+
+type RuleSortSetRequest struct {
+	Input pluginsdk.RuleSortWrite
+}
+
+type RuleDefaultSetRequest struct {
+	Input pluginsdk.RuleDefaultWrite
+}
+
 func (s *hostServicesServer) UpsertSiteAccount(req SiteAccountUpsertRequest, reply *JSONReply) error {
 	if s.siteAccounts == nil {
 		return fmt.Errorf("宿主未提供 SiteAccounts")
@@ -277,6 +290,82 @@ func (s *hostServicesServer) UpsertTransfer(req TransferUpsertRequest, reply *JS
 		return err
 	}
 	result, err := s.transfers.UpsertTransfer(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) GetRuleCatalog(_ Empty, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.read"); err != nil {
+		return err
+	}
+	result, err := s.rules.GetRuleCatalog(s.ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) UpsertRuleProfile(req RuleProfileUpsertRequest, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.write"); err != nil {
+		return err
+	}
+	result, err := s.rules.UpsertRuleProfile(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) SetRuleSort(req RuleSortSetRequest, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.write"); err != nil {
+		return err
+	}
+	result, err := s.rules.SetRuleSort(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) SetRuleDefault(req RuleDefaultSetRequest, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.write"); err != nil {
+		return err
+	}
+	result, err := s.rules.SetRuleDefault(s.ctx, req.Input)
 	if err != nil {
 		return err
 	}
@@ -520,6 +609,54 @@ func (c *hostServicesClient) UpsertTransfer(ctx context.Context, input pluginsdk
 	var result pluginsdk.HostWriteResult
 	if err := decodeJSON(reply.Data, &result); err != nil {
 		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) GetRuleCatalog(ctx context.Context) (pluginsdk.RuleCatalog, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.GetRuleCatalog", Empty{}, &reply); err != nil {
+		return pluginsdk.RuleCatalog{}, err
+	}
+	var result pluginsdk.RuleCatalog
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.RuleCatalog{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) UpsertRuleProfile(ctx context.Context, input pluginsdk.RuleProfileWrite) (pluginsdk.HostWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.UpsertRuleProfile", RuleProfileUpsertRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	var result pluginsdk.HostWriteResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) SetRuleSort(ctx context.Context, input pluginsdk.RuleSortWrite) (pluginsdk.RuleSortResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.SetRuleSort", RuleSortSetRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.RuleSortResult{}, err
+	}
+	var result pluginsdk.RuleSortResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.RuleSortResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) SetRuleDefault(ctx context.Context, input pluginsdk.RuleDefaultWrite) (pluginsdk.RuleDefaultResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.SetRuleDefault", RuleDefaultSetRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.RuleDefaultResult{}, err
+	}
+	var result pluginsdk.RuleDefaultResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.RuleDefaultResult{}, err
 	}
 	return result, nil
 }

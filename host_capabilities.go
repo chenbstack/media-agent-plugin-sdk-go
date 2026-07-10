@@ -50,21 +50,118 @@ type EpisodeSelection struct {
 }
 
 type SubscriptionWrite struct {
-	TargetID       string             `json:"target_id,omitempty"`
-	IdempotencyKey string             `json:"idempotency_key"`
-	Media          MediaIdentity      `json:"media"`
-	Season         int                `json:"season,omitempty"`
-	TotalEpisodes  int                `json:"total_episodes,omitempty"`
-	WantedEpisodes []EpisodeSelection `json:"wanted_episodes,omitempty"`
-	Status         string             `json:"status,omitempty"`
-	SourceName     string             `json:"source_name,omitempty"`
-	CreatedAt      string             `json:"created_at,omitempty"`
-	Metadata       json.RawMessage    `json:"metadata,omitempty"`
+	TargetID        string             `json:"target_id,omitempty"`
+	IdempotencyKey  string             `json:"idempotency_key"`
+	Media           MediaIdentity      `json:"media"`
+	Season          int                `json:"season,omitempty"`
+	TotalEpisodes   int                `json:"total_episodes,omitempty"`
+	WantedEpisodes  []EpisodeSelection `json:"wanted_episodes,omitempty"`
+	Status          string             `json:"status,omitempty"`
+	RuleProfileID   string             `json:"rule_profile_id,omitempty"`
+	RuleProfileName string             `json:"rule_profile_name,omitempty"`
+	RuleProfileKey  string             `json:"rule_profile_key,omitempty"`
+	SourceName      string             `json:"source_name,omitempty"`
+	CreatedAt       string             `json:"created_at,omitempty"`
+	Metadata        json.RawMessage    `json:"metadata,omitempty"`
 }
 
 // Subscriptions exposes idempotent subscription writes to plugins.
 type Subscriptions interface {
 	UpsertSubscription(ctx context.Context, input SubscriptionWrite) (HostWriteResult, error)
+}
+
+// RuleDimension selects ordered values from one host rule dimension. Values
+// inside a dimension are alternatives ordered by preference; different
+// prerequisite dimensions must all match.
+type RuleDimension struct {
+	ID       string   `json:"id"`
+	Selected []string `json:"selected"`
+}
+
+// RuleSizeRange constrains the candidate size in GiB. Nil bounds are open.
+type RuleSizeRange struct {
+	MinGB *float64 `json:"min_gb,omitempty"`
+	MaxGB *float64 `json:"max_gb,omitempty"`
+}
+
+// RulePrerequisites contains portable constraints used to decide whether a
+// candidate can enter a rule profile. Keyword patterns use RE2 syntax.
+type RulePrerequisites struct {
+	Dimensions             []RuleDimension `json:"dimensions,omitempty"`
+	Size                   RuleSizeRange   `json:"size,omitempty"`
+	MinSeeders             *int            `json:"min_seeders,omitempty"`
+	MinAgeMinutes          *int            `json:"min_age_minutes,omitempty"`
+	MaxAgeMinutes          *int            `json:"max_age_minutes,omitempty"`
+	IncludeKeywords        []string        `json:"include_keywords,omitempty"`
+	ExcludeKeywords        []string        `json:"exclude_keywords,omitempty"`
+	IncludeKeywordPattern  string          `json:"include_keyword_pattern,omitempty"`
+	ExcludeKeywordPattern  string          `json:"exclude_keyword_pattern,omitempty"`
+	IncludePatternAdvanced bool            `json:"include_pattern_advanced,omitempty"`
+	ExcludePatternAdvanced bool            `json:"exclude_pattern_advanced,omitempty"`
+}
+
+// RuleProfileWrite is the host-neutral representation of one rule profile.
+// IdempotencyKey is scoped to the calling plugin and can also be referenced by
+// SubscriptionWrite.RuleProfileKey.
+type RuleProfileWrite struct {
+	TargetID        string            `json:"target_id,omitempty"`
+	IdempotencyKey  string            `json:"idempotency_key"`
+	Name            string            `json:"name"`
+	Description     string            `json:"description,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	Priority        int               `json:"priority,omitempty"`
+	MediaType       string            `json:"media_type,omitempty"`
+	MediaCategory   string            `json:"media_category,omitempty"`
+	MatchConditions []string          `json:"match_conditions,omitempty"`
+	Prerequisites   RulePrerequisites `json:"prerequisites,omitempty"`
+	Preferences     []RuleDimension   `json:"preferences,omitempty"`
+	Fallback        string            `json:"fallback,omitempty"`
+}
+
+type RuleDimensionDefinition struct {
+	ID      string   `json:"id"`
+	Label   string   `json:"label"`
+	Options []string `json:"options"`
+}
+
+// RuleCatalog describes the rule vocabulary supported by the current host.
+type RuleCatalog struct {
+	Dimensions      []RuleDimensionDefinition `json:"dimensions"`
+	SortOptions     []string                  `json:"sort_options"`
+	IncludeKeywords []string                  `json:"include_keywords,omitempty"`
+	ExcludeKeywords []string                  `json:"exclude_keywords,omitempty"`
+}
+
+type RuleSortWrite struct {
+	Selected []string `json:"selected"`
+}
+
+type RuleSortResult struct {
+	Selected []string `json:"selected"`
+}
+
+// RuleDefaultWrite selects a plugin-owned or existing rule profile as the
+// default for a host workflow. Supported scopes are host-defined and returned
+// as an error when unavailable.
+type RuleDefaultWrite struct {
+	Scope           string `json:"scope"`
+	RuleProfileID   string `json:"rule_profile_id,omitempty"`
+	RuleProfileName string `json:"rule_profile_name,omitempty"`
+	RuleProfileKey  string `json:"rule_profile_key,omitempty"`
+}
+
+type RuleDefaultResult struct {
+	Scope         string `json:"scope"`
+	RuleProfileID string `json:"rule_profile_id"`
+}
+
+// Rules exposes stable rule-profile operations without exposing persistence
+// tables or a source-system-specific rule language.
+type Rules interface {
+	GetRuleCatalog(ctx context.Context) (RuleCatalog, error)
+	UpsertRuleProfile(ctx context.Context, input RuleProfileWrite) (HostWriteResult, error)
+	SetRuleSort(ctx context.Context, input RuleSortWrite) (RuleSortResult, error)
+	SetRuleDefault(ctx context.Context, input RuleDefaultWrite) (RuleDefaultResult, error)
 }
 
 type DownloadFileWrite struct {
