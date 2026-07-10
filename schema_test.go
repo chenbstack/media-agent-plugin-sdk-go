@@ -73,6 +73,24 @@ func TestSchemaSelfValidation(t *testing.T) {
 	}
 }
 
+func TestParseManifestClassification(t *testing.T) {
+	manifest, err := ParseManifest([]byte(`
+id: drive115
+name: 115
+version: 1.0.0
+category: storage
+tags: [115, cloud-drive]
+type: cli
+capabilities: [storage.path]
+`))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if manifest.Category != CategoryStorage || len(manifest.Tags) != 2 || manifest.Tags[1] != "cloud-drive" {
+		t.Fatalf("classification = %q %+v", manifest.Category, manifest.Tags)
+	}
+}
+
 func TestRegistry(t *testing.T) {
 	r := NewRegistry()
 	p := Plugin{Manifest: Manifest{

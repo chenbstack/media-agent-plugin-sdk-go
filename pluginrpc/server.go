@@ -185,6 +185,37 @@ func (s *rpcServer) HandleEvent(req EventRequest, reply *Empty) error {
 	return subscriber.HandleEvent(context.Background(), event)
 }
 
+func (s *rpcServer) RunAction(req ActionRunRequest, reply *JSONReply) error {
+	if s.plugin.NewActionHandler == nil {
+		return fmt.Errorf("插件未实现 ActionHandler")
+	}
+	inst, secrets, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	input := map[string]any{}
+	if len(req.InputJSON) > 0 {
+		if err := json.Unmarshal(req.InputJSON, &input); err != nil {
+			return err
+		}
+	}
+	handler, err := s.plugin.NewActionHandler(context.Background(), inst, secrets)
+	if err != nil {
+		return err
+	}
+	result, err := handler.RunAction(context.Background(), req.ActionID, input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) RendererTest(req InstancePayload, reply *Empty) error {
 	provider, closeFn, err := s.renderer(req)
 	if err != nil {
@@ -481,6 +512,11 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		inst.KV = services
 		inst.DB = services
 		inst.Logger = services
+		inst.SiteAccounts = services
+		inst.Subscriptions = services
+		inst.Downloads = services
+		inst.Transfers = services
+		inst.Rules = services
 	}
 	closeFn := func() {}
 	if services != nil {
