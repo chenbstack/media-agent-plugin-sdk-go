@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"media-agent-lab/server/pkg/pluginsdk"
-	"media-agent-lab/server/pkg/pluginsdk/providers"
+	"github.com/chenbstack/media-agent-plugin-sdk-go"
+	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
 
 func (c *Client) Manifest() (pluginsdk.Manifest, error) {

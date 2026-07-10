@@ -7,7 +7,7 @@ import (
 
 	hcplugin "github.com/hashicorp/go-plugin"
 
-	"media-agent-lab/server/pkg/pluginsdk/providers"
+	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
 
 type uploadSourceServer struct {

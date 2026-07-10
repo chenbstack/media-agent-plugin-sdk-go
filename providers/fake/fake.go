@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"media-agent-lab/server/pkg/pluginsdk/providers"
+	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
 
 // ---- 下载器 ----

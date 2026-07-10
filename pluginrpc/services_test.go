@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"media-agent-lab/server/pkg/pluginsdk"
+	"github.com/chenbstack/media-agent-plugin-sdk-go"
 )
 
 func TestHostServicesRequireKVPermission(t *testing.T) {

@@ -15,8 +15,8 @@ import (
 
 	hcplugin "github.com/hashicorp/go-plugin"
 
-	"media-agent-lab/server/pkg/pluginsdk"
-	"media-agent-lab/server/pkg/pluginsdk/providers"
+	"github.com/chenbstack/media-agent-plugin-sdk-go"
+	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
 
 const PluginName = "media-agent-provider"
@@ -179,15 +179,15 @@ func decodeConfig(data []byte) (map[string]any, error) {
 }
 
 type ClientConfig struct {
-	Command           string
-	Args              []string
-	Dir               string
-	Stderr            io.Writer
-	Manifest          pluginsdk.Manifest
-	Permissions       pluginsdk.Permissions
-	ScopeType         string
-	ScopeID           string
-	Operation         string
+	Command     string
+	Args        []string
+	Dir         string
+	Stderr      io.Writer
+	Manifest    pluginsdk.Manifest
+	Permissions pluginsdk.Permissions
+	ScopeType   string
+	ScopeID     string
+	Operation   string
 	// Env 是本次操作追加到子进程环境的额外变量（key=value）；空则仅继承宿主环境。
 	Env               []string
 	ProcessObserver   ProcessObserver

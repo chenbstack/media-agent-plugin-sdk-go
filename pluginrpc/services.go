@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"media-agent-lab/server/pkg/pluginsdk"
+	"github.com/chenbstack/media-agent-plugin-sdk-go"
 )
 
 type hostServicesServer struct {
