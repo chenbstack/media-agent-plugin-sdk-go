@@ -11,6 +11,9 @@ import (
 	"net/rpc"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	hcplugin "github.com/hashicorp/go-plugin"
@@ -20,6 +23,12 @@ import (
 )
 
 const PluginName = "media-agent-provider"
+
+// PackPluginName 返回逻辑插件在 HashiCorp PluginSet 中的稳定名称。
+// 单插件 Serve 继续使用 PluginName，以保持 provider.v1 完全兼容。
+func PackPluginName(pluginID string) string {
+	return PluginName + "." + pluginID
+}
 
 var Handshake = hcplugin.HandshakeConfig{
 	ProtocolVersion:  1,
@@ -50,12 +59,67 @@ func clientPluginSet() hcplugin.PluginSet {
 	return hcplugin.PluginSet{PluginName: &netRPCPlugin{}}
 }
 
+func packPluginSet(impls []pluginsdk.Plugin) (hcplugin.PluginSet, error) {
+	if len(impls) == 0 {
+		return nil, fmt.Errorf("插件 Pack 至少包含一个逻辑插件")
+	}
+	set := make(hcplugin.PluginSet, len(impls))
+	for _, impl := range impls {
+		id := strings.TrimSpace(impl.Manifest.ID)
+		if id == "" {
+			return nil, fmt.Errorf("插件 Pack 包含空 plugin id")
+		}
+		if id != impl.Manifest.ID {
+			return nil, fmt.Errorf("插件 Pack 的 plugin id 不能包含首尾空白: %q", impl.Manifest.ID)
+		}
+		name := PackPluginName(id)
+		if _, exists := set[name]; exists {
+			return nil, fmt.Errorf("插件 Pack 的 plugin id 重复: %s", id)
+		}
+		set[name] = &netRPCPlugin{impl: impl}
+	}
+	return set, nil
+}
+
+func packClientPluginSet(pluginIDs []string) (hcplugin.PluginSet, error) {
+	if len(pluginIDs) == 0 {
+		return nil, fmt.Errorf("插件 Pack 至少声明一个逻辑插件")
+	}
+	set := make(hcplugin.PluginSet, len(pluginIDs))
+	for _, rawID := range pluginIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return nil, fmt.Errorf("插件 Pack 包含空 plugin id")
+		}
+		name := PackPluginName(id)
+		if _, exists := set[name]; exists {
+			return nil, fmt.Errorf("插件 Pack 的 plugin id 重复: %s", id)
+		}
+		set[name] = &netRPCPlugin{}
+	}
+	return set, nil
+}
+
 // Serve exposes a pluginsdk.Plugin implementation as a HashiCorp go-plugin
 // net/rpc plugin. Third-party Go plugins call this from main().
 func Serve(impl pluginsdk.Plugin) {
 	hcplugin.Serve(&hcplugin.ServeConfig{
 		HandshakeConfig: Handshake,
 		Plugins:         pluginSet(impl),
+	})
+}
+
+// ServePack 在一个 HashiCorp go-plugin 进程中暴露多个逻辑 Plugin。每个逻辑插件
+// 仍拥有独立 manifest、权限和 RPC service；调用方应从 main() 使用本函数，且不应
+// 再调用 Serve。是否允许某发布者分发 Pack 是 Cloud/宿主策略，不由 SDK 硬编码。
+func ServePack(impls []pluginsdk.Plugin) {
+	set, err := packPluginSet(impls)
+	if err != nil {
+		panic(err)
+	}
+	hcplugin.Serve(&hcplugin.ServeConfig{
+		HandshakeConfig: Handshake,
+		Plugins:         set,
 	})
 }
 
@@ -191,6 +255,34 @@ type ClientConfig struct {
 	// Env 是本次操作追加到子进程环境的额外变量（key=value）；空则仅继承宿主环境。
 	Env               []string
 	ProcessObserver   ProcessObserver
+	ActivityObserver  PluginActivityObserver
+	PermissionChecker PermissionChecker
+	Credentials       *ProcessCredentials
+}
+
+// PackPluginConfig 是宿主从已校验 pack.yaml 和逻辑 plugin manifest 组装出的
+// 客户端绑定信息。Manifest.ID 是 Dispense 和权限隔离的逻辑 plugin id；权限只读取
+// Manifest.Permissions，运行时授权由 PermissionChecker 继续收窄。
+type PackPluginConfig struct {
+	Manifest  pluginsdk.Manifest
+	ScopeType string
+	ScopeID   string
+}
+
+// PackClientConfig 启动一个常驻 Plugin Pack 进程。Plugins 是宿主允许加载的逻辑
+// 插件清单，同时也是可枚举/Dispense 的信任边界；不能以进程自行声称的列表替代。
+type PackClientConfig struct {
+	Command           string
+	Args              []string
+	Dir               string
+	Stderr            io.Writer
+	PackID            string
+	PackName          string
+	Plugins           []PackPluginConfig
+	Operation         string
+	Env               []string
+	ProcessObserver   ProcessObserver
+	ActivityObserver  PluginActivityObserver
 	PermissionChecker PermissionChecker
 	Credentials       *ProcessCredentials
 }
@@ -203,6 +295,8 @@ type Client struct {
 	scopeType         string
 	scopeID           string
 	permissionChecker PermissionChecker
+	activityObserver  PluginActivityObserver
+	packID            string
 }
 
 type PermissionChecker interface {
@@ -210,6 +304,9 @@ type PermissionChecker interface {
 }
 
 type ProcessStartInfo struct {
+	Kind       ProcessKind
+	PackID     string
+	PluginIDs  []string
 	PluginID   string
 	PluginName string
 	Operation  string
@@ -220,8 +317,53 @@ type ProcessStartInfo struct {
 	StartedAt  time.Time
 }
 
+// ProcessKind 区分普通单插件进程和承载多个逻辑插件的 Pack 物理进程。零值表示
+// 旧调用方尚未声明类型，消费者应按 standalone 兼容处理。
+type ProcessKind string
+
+const (
+	ProcessKindStandalone ProcessKind = "standalone"
+	ProcessKindPack       ProcessKind = "plugin_pack"
+)
+
+// EffectiveKind 把旧版 observer 产生的零值 Kind 归一化为 standalone。
+func (i ProcessStartInfo) EffectiveKind() ProcessKind {
+	if i.Kind == "" {
+		return ProcessKindStandalone
+	}
+	return i.Kind
+}
+
+// LogicalPluginIDs 返回该物理进程承载的逻辑插件。旧版单插件 observer 只有
+// PluginID 时会自动归一化为单元素列表。
+func (i ProcessStartInfo) LogicalPluginIDs() []string {
+	if len(i.PluginIDs) > 0 {
+		return append([]string(nil), i.PluginIDs...)
+	}
+	if i.PluginID != "" {
+		return []string{i.PluginID}
+	}
+	return nil
+}
+
 type ProcessObserver interface {
 	PluginProcessStarted(info ProcessStartInfo) func()
+}
+
+// PluginActivityStartInfo 描述共享 Pack 内一次逻辑插件 RPC 活动。它与物理进程
+// ProcessStartInfo 分离，避免把同一 PID 的资源重复计入每个插件。
+type PluginActivityStartInfo struct {
+	PluginID   string
+	PluginName string
+	PackID     string
+	Operation  string
+	ScopeType  string
+	ScopeID    string
+	StartedAt  time.Time
+}
+
+type PluginActivityObserver interface {
+	PluginActivityStarted(info PluginActivityStartInfo) func()
 }
 
 type runningClient struct {
@@ -276,9 +418,12 @@ func startClient(ctx context.Context, cfg ClientConfig) (*runningClient, error) 
 	typed.scopeType = cfg.ScopeType
 	typed.scopeID = cfg.ScopeID
 	typed.permissionChecker = cfg.PermissionChecker
+	typed.activityObserver = cfg.ActivityObserver
 	var done func()
 	if cfg.ProcessObserver != nil && cmd.Process != nil {
 		done = cfg.ProcessObserver.PluginProcessStarted(ProcessStartInfo{
+			Kind:       ProcessKindStandalone,
+			PluginIDs:  []string{cfg.Manifest.ID},
 			PluginID:   cfg.Manifest.ID,
 			PluginName: cfg.Manifest.Name,
 			Operation:  cfg.Operation,
@@ -290,6 +435,189 @@ func startClient(ctx context.Context, cfg ClientConfig) (*runningClient, error) 
 		})
 	}
 	return &runningClient{process: client, client: typed, done: done}, nil
+}
+
+// PackClient 持有一个 Pack 物理进程和按逻辑 plugin id 分发的 RPC 客户端。
+// Close 只执行一次并终止整个 Pack；停用单个逻辑插件不应调用 Close。
+type PackClient struct {
+	process  *hcplugin.Client
+	protocol hcplugin.ClientProtocol
+	configs  map[string]PackPluginConfig
+	ids      []string
+	packID   string
+	done     func()
+	checker  PermissionChecker
+	activity PluginActivityObserver
+
+	mu      sync.Mutex
+	clients map[string]*Client
+	closed  bool
+}
+
+// StartPackClient 启动一个 Pack 进程但不主动初始化各逻辑插件。宿主可先调用
+// PluginIDs 枚举，再按需 Dispense；进程观察器只收到一条 Pack 级启动记录。
+func StartPackClient(ctx context.Context, cfg PackClientConfig) (*PackClient, error) {
+	if cfg.Command == "" {
+		return nil, fmt.Errorf("插件 Pack 入口为空")
+	}
+	packID := strings.TrimSpace(cfg.PackID)
+	if packID == "" {
+		return nil, fmt.Errorf("插件 Pack id 为空")
+	}
+	configs := make(map[string]PackPluginConfig, len(cfg.Plugins))
+	ids := make([]string, 0, len(cfg.Plugins))
+	for _, pluginCfg := range cfg.Plugins {
+		id := strings.TrimSpace(pluginCfg.Manifest.ID)
+		if id == "" {
+			return nil, fmt.Errorf("插件 Pack 包含空 plugin id")
+		}
+		if id != pluginCfg.Manifest.ID {
+			return nil, fmt.Errorf("插件 Pack 的 plugin id 不能包含首尾空白: %q", pluginCfg.Manifest.ID)
+		}
+		if _, exists := configs[id]; exists {
+			return nil, fmt.Errorf("插件 Pack 的 plugin id 重复: %s", id)
+		}
+		configs[id] = pluginCfg
+		ids = append(ids, id)
+	}
+	set, err := packClientPluginSet(ids)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+	if cfg.Dir != "" {
+		cmd.Dir = cfg.Dir
+	}
+	if len(cfg.Env) > 0 {
+		cmd.Env = append(os.Environ(), cfg.Env...)
+	}
+	if err := applyProcessCredentials(cmd, cfg.Credentials); err != nil {
+		return nil, err
+	}
+	process := hcplugin.NewClient(&hcplugin.ClientConfig{
+		HandshakeConfig:  Handshake,
+		Plugins:          set,
+		Cmd:              cmd,
+		AllowedProtocols: []hcplugin.Protocol{hcplugin.ProtocolNetRPC},
+		StartTimeout:     20 * time.Second,
+		Stderr:           cfg.Stderr,
+		SyncStdout:       io.Discard,
+		SyncStderr:       cfg.Stderr,
+	})
+	protocol, err := process.Client()
+	if err != nil {
+		process.Kill()
+		return nil, err
+	}
+
+	var done func()
+	if cfg.ProcessObserver != nil && cmd.Process != nil {
+		observedIDs := append([]string(nil), ids...)
+		sort.Strings(observedIDs)
+		done = cfg.ProcessObserver.PluginProcessStarted(ProcessStartInfo{
+			Kind:       ProcessKindPack,
+			PackID:     packID,
+			PluginIDs:  observedIDs,
+			PluginName: cfg.PackName,
+			Operation:  cfg.Operation,
+			ScopeType:  "pack",
+			ScopeID:    packID,
+			PID:        cmd.Process.Pid,
+			Command:    cfg.Command,
+			StartedAt:  time.Now(),
+		})
+	}
+	return &PackClient{
+		process: process, protocol: protocol, configs: configs,
+		ids: append([]string(nil), ids...), packID: packID, done: done, checker: cfg.PermissionChecker,
+		activity: cfg.ActivityObserver,
+		clients:  make(map[string]*Client),
+	}, nil
+}
+
+// PluginIDs 返回 Pack 中可被宿主 Dispense 的逻辑插件 ID，顺序与 PackClientConfig 一致。
+func (c *PackClient) PluginIDs() []string {
+	if c == nil {
+		return nil
+	}
+	return append([]string(nil), c.ids...)
+}
+
+// Ping 检查 Pack RPC 连接是否仍然健康，供宿主健康检查和崩溃回滚使用。
+func (c *PackClient) Ping() error {
+	if c == nil {
+		return fmt.Errorf("插件 Pack 客户端为空")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return fmt.Errorf("插件 Pack 客户端已关闭")
+	}
+	return c.protocol.Ping()
+}
+
+// Dispense 返回绑定到指定逻辑插件 manifest 和权限上下文的客户端。同一 ID 重复调用
+// 返回缓存客户端，不会启动新 OS 进程。
+func (c *PackClient) Dispense(pluginID string) (*Client, error) {
+	if c == nil {
+		return nil, fmt.Errorf("插件 Pack 客户端为空")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, fmt.Errorf("插件 Pack 客户端已关闭")
+	}
+	if client := c.clients[pluginID]; client != nil {
+		return client, nil
+	}
+	pluginCfg, ok := c.configs[pluginID]
+	if !ok {
+		return nil, fmt.Errorf("插件 Pack 未声明 plugin id %q", pluginID)
+	}
+	raw, err := c.protocol.Dispense(PackPluginName(pluginID))
+	if err != nil {
+		return nil, err
+	}
+	typed, ok := raw.(*Client)
+	if !ok {
+		return nil, fmt.Errorf("插件 Pack %s 返回了未知客户端类型 %T", pluginID, raw)
+	}
+	typed.manifest = pluginCfg.Manifest
+	// 权限只能来自该逻辑插件已校验的 manifest；动态授权由 PermissionChecker
+	// 再收窄，避免 Pack 配置通过第二份权限清单扩大能力。
+	typed.permissions = pluginCfg.Manifest.Permissions
+	typed.scopeType = pluginCfg.ScopeType
+	typed.scopeID = pluginCfg.ScopeID
+	typed.permissionChecker = c.checker
+	typed.activityObserver = c.activity
+	// PackID 只用于逻辑活动归属，不参与 RPC 寻址或权限判断。
+	typed.packID = c.packID
+	c.clients[pluginID] = typed
+	return typed, nil
+}
+
+// Close 终止整个 Pack 进程并结束 Pack 级资源观察。
+func (c *PackClient) Close() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	done := c.done
+	c.done = nil
+	process := c.process
+	c.mu.Unlock()
+	if done != nil {
+		done()
+	}
+	if process != nil {
+		process.Kill()
+	}
 }
 
 func (c *runningClient) Close() {

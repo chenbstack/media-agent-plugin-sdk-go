@@ -7,6 +7,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -27,9 +30,65 @@ type Manifest struct {
 	StdioArgs     []string            `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
 	Capabilities  []string            `yaml:"capabilities" json:"capabilities"`
 	Subscriptions []EventSubscription `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
+	API           *APIExtension       `yaml:"api,omitempty" json:"api,omitempty"`
+	UI            *UIExtension        `yaml:"ui,omitempty" json:"ui,omitempty"`
+	Identity      *IdentityExtension  `yaml:"identity,omitempty" json:"identity,omitempty"`
+	Entitlements  []string            `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
 	Permissions   Permissions         `yaml:"permissions" json:"permissions"`
 	Resources     Resources           `yaml:"resources" json:"resources"`
 	Install       *InstallInfo        `yaml:"install,omitempty" json:"install,omitempty"`
+}
+
+// APIExtension 声明由宿主代理的插件业务 API。Service 会成为
+// /api/v1/plugin-services/{plugin_id}/{service}/... 中的 service 段。
+type APIExtension struct {
+	Service              string      `yaml:"service" json:"service"`
+	Auth                 APIAuthMode `yaml:"auth,omitempty" json:"auth,omitempty"`
+	RequiredEntitlements []string    `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+}
+
+type APIAuthMode string
+
+const (
+	APIAuthSession APIAuthMode = "session"
+	APIAuthNone    APIAuthMode = "none"
+
+	CapabilityAPIEndpoint      = "api.endpoint"
+	CapabilityUIModule         = "ui.module"
+	CapabilityIdentityProvider = "identity.provider"
+)
+
+// UIExtension 声明随已验签制品分发的前端模块及其页面。Module 必须是制品内的
+// 相对路径，不能是远程 URL；宿主仍需根据签名和发布策略决定是否允许同源加载。
+type UIExtension struct {
+	Module string    `yaml:"module" json:"module"`
+	Routes []UIRoute `yaml:"routes" json:"routes"`
+}
+
+// UIRoute 是插件前端模块导出的一个页面。默认路由应位于
+// /plugin/{plugin_id}/ 下；可信插件的顶级别名由宿主额外授权，SDK 不判断发布者信任。
+type UIRoute struct {
+	ID                   string   `yaml:"id" json:"id"`
+	Path                 string   `yaml:"path" json:"path"`
+	Export               string   `yaml:"export" json:"export"`
+	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	Menu                 *UIMenu  `yaml:"menu,omitempty" json:"menu,omitempty"`
+}
+
+// UIMenu 声明页面在宿主导航中的位置。Icon 是宿主提供的稳定图标 ID，不能是源码
+// 或任意资源 URL。
+type UIMenu struct {
+	Section string `yaml:"section" json:"section"`
+	Label   string `yaml:"label" json:"label"`
+	Icon    string `yaml:"icon" json:"icon"`
+	Order   int    `yaml:"order,omitempty" json:"order,omitempty"`
+}
+
+// IdentityExtension 声明插件身份 Provider 的 RPC service 名称及启用它所需的权益。
+// Session 签发、CSRF 和找回入口始终由宿主负责。
+type IdentityExtension struct {
+	Service              string   `yaml:"service,omitempty" json:"service,omitempty"`
+	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
 }
 
 // InstallInfo 是插件对其自举安装步骤（capability lifecycle.install）的自我描述。
@@ -305,7 +364,9 @@ type UninstallResult struct {
 	Message string `json:"message,omitempty"`
 }
 
-func (p Plugin) validate() error {
+// Validate 校验插件 manifest、全栈扩展声明和配置 schema。宿主应在信任或加载
+// 插件资源前调用；Registry.Register/Upsert 也会自动执行相同校验。
+func (p Plugin) Validate() error {
 	m := p.Manifest
 	if m.ID == "" || m.Name == "" || m.Version == "" {
 		return fmt.Errorf("manifest 必须包含 id、name、version")
@@ -321,6 +382,16 @@ func (p Plugin) validate() error {
 	if len(m.Capabilities) == 0 {
 		return fmt.Errorf("插件 %s: 必须声明至少一个 capability", m.ID)
 	}
+	capabilities := make(map[string]struct{}, len(m.Capabilities))
+	for _, capability := range m.Capabilities {
+		if !manifestIdentifier.MatchString(capability) {
+			return fmt.Errorf("插件 %s: capability %q 格式无效", m.ID, capability)
+		}
+		if _, exists := capabilities[capability]; exists {
+			return fmt.Errorf("插件 %s: capability 重复 %q", m.ID, capability)
+		}
+		capabilities[capability] = struct{}{}
+	}
 	for _, sub := range m.Subscriptions {
 		if sub.Type == "" {
 			return fmt.Errorf("插件 %s: event subscription 必须包含 type", m.ID)
@@ -329,7 +400,133 @@ func (p Plugin) validate() error {
 			return fmt.Errorf("插件 %s: event subscription %s 必须包含正数 version", m.ID, sub.Type)
 		}
 	}
+	if err := m.validateExtensions(capabilities); err != nil {
+		return err
+	}
 	return p.ConfigSchema.validate(m.ID)
+}
+
+func (p Plugin) validate() error { return p.Validate() }
+
+var manifestIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
+	declaredEntitlements, err := validateEntitlements(m.ID, "manifest", m.Entitlements, nil)
+	if err != nil {
+		return err
+	}
+
+	_, hasAPI := capabilities[CapabilityAPIEndpoint]
+	if hasAPI && m.API == nil {
+		return fmt.Errorf("插件 %s: capability api.endpoint 必须声明 api", m.ID)
+	}
+	if m.API != nil {
+		if !hasAPI {
+			return fmt.Errorf("插件 %s: 声明 api 时必须包含 capability api.endpoint", m.ID)
+		}
+		if !manifestIdentifier.MatchString(m.API.Service) {
+			return fmt.Errorf("插件 %s: api.service %q 格式无效", m.ID, m.API.Service)
+		}
+		if m.API.Auth != "" && m.API.Auth != APIAuthSession && m.API.Auth != APIAuthNone {
+			return fmt.Errorf("插件 %s: api.auth 只支持 session 或 none", m.ID)
+		}
+		if _, err := validateEntitlements(m.ID, "api", m.API.RequiredEntitlements, declaredEntitlements); err != nil {
+			return err
+		}
+	}
+
+	_, hasUI := capabilities[CapabilityUIModule]
+	if hasUI && m.UI == nil {
+		return fmt.Errorf("插件 %s: capability ui.module 必须声明 ui", m.ID)
+	}
+	if m.UI != nil {
+		if !hasUI {
+			return fmt.Errorf("插件 %s: 声明 ui 时必须包含 capability ui.module", m.ID)
+		}
+		if err := validateAssetPath(m.UI.Module); err != nil {
+			return fmt.Errorf("插件 %s: ui.module %w", m.ID, err)
+		}
+		if len(m.UI.Routes) == 0 {
+			return fmt.Errorf("插件 %s: ui.routes 不能为空", m.ID)
+		}
+		routeIDs := make(map[string]struct{}, len(m.UI.Routes))
+		routePaths := make(map[string]struct{}, len(m.UI.Routes))
+		for _, route := range m.UI.Routes {
+			if !manifestIdentifier.MatchString(route.ID) {
+				return fmt.Errorf("插件 %s: ui route id %q 格式无效", m.ID, route.ID)
+			}
+			if _, exists := routeIDs[route.ID]; exists {
+				return fmt.Errorf("插件 %s: ui route id 重复 %q", m.ID, route.ID)
+			}
+			routeIDs[route.ID] = struct{}{}
+			if !validRoutePath(route.Path) {
+				return fmt.Errorf("插件 %s: ui route %s 的 path %q 格式无效", m.ID, route.ID, route.Path)
+			}
+			if _, exists := routePaths[route.Path]; exists {
+				return fmt.Errorf("插件 %s: ui route path 重复 %q", m.ID, route.Path)
+			}
+			routePaths[route.Path] = struct{}{}
+			if !manifestIdentifier.MatchString(route.Export) {
+				return fmt.Errorf("插件 %s: ui route %s 的 export %q 格式无效", m.ID, route.ID, route.Export)
+			}
+			if _, err := validateEntitlements(m.ID, "ui route "+route.ID, route.RequiredEntitlements, declaredEntitlements); err != nil {
+				return err
+			}
+			if route.Menu != nil {
+				if !manifestIdentifier.MatchString(route.Menu.Section) || !manifestIdentifier.MatchString(route.Menu.Icon) || strings.TrimSpace(route.Menu.Label) == "" {
+					return fmt.Errorf("插件 %s: ui route %s 的 menu 必须包含合法 section、label、icon", m.ID, route.ID)
+				}
+			}
+		}
+	}
+
+	_, hasIdentity := capabilities[CapabilityIdentityProvider]
+	if m.Identity != nil {
+		if !hasIdentity {
+			return fmt.Errorf("插件 %s: 声明 identity 时必须包含 capability identity.provider", m.ID)
+		}
+		if m.Identity.Service != "" && !manifestIdentifier.MatchString(m.Identity.Service) {
+			return fmt.Errorf("插件 %s: identity.service %q 格式无效", m.ID, m.Identity.Service)
+		}
+		if _, err := validateEntitlements(m.ID, "identity", m.Identity.RequiredEntitlements, declaredEntitlements); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAssetPath(value string) error {
+	if value == "" || strings.ContainsAny(value, "\\:%?#") || strings.HasPrefix(value, "/") || strings.TrimSpace(value) != value {
+		return fmt.Errorf("必须是制品内相对路径")
+	}
+	clean := path.Clean(value)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || clean != value {
+		return fmt.Errorf("必须是规范化且不能越界的相对路径")
+	}
+	return nil
+}
+
+func validRoutePath(value string) bool {
+	return strings.HasPrefix(value, "/") && !strings.ContainsAny(value, "\\:%?#") && strings.TrimSpace(value) == value && path.Clean(value) == value
+}
+
+func validateEntitlements(pluginID, owner string, values []string, declared map[string]struct{}) (map[string]struct{}, error) {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !manifestIdentifier.MatchString(value) {
+			return nil, fmt.Errorf("插件 %s: %s entitlement %q 格式无效", pluginID, owner, value)
+		}
+		if _, exists := seen[value]; exists {
+			return nil, fmt.Errorf("插件 %s: %s entitlement 重复 %q", pluginID, owner, value)
+		}
+		if declared != nil {
+			if _, exists := declared[value]; !exists {
+				return nil, fmt.Errorf("插件 %s: %s 使用了未在 manifest 声明的 entitlement %q", pluginID, owner, value)
+			}
+		}
+		seen[value] = struct{}{}
+	}
+	return seen, nil
 }
 
 // HasCapability 判断插件是否声明了某能力域（如 "downloader" 匹配 "downloader.add"）。

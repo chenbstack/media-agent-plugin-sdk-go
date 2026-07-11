@@ -54,8 +54,54 @@ func TestClientCallReturnsWhenContextExpires(t *testing.T) {
 	close(release)
 }
 
+func TestClientCallReportsLogicalPackActivity(t *testing.T) {
+	server := rpc.NewServer()
+	if err := server.RegisterName("Plugin", &immediateRPCServer{}); err != nil {
+		t.Fatalf("RegisterName: %v", err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	go server.ServeConn(serverConn)
+
+	observer := &recordingActivityObserver{}
+	client := &Client{
+		client: rpc.NewClient(clientConn),
+		manifest: pluginsdk.Manifest{
+			ID: "family", Name: "Family",
+		},
+		packID: "official", scopeType: "plugin", scopeID: "global",
+		activityObserver: observer,
+	}
+	defer client.client.Close()
+	var reply Empty
+	if err := client.call(context.Background(), "Plugin.Ping", Empty{}, &reply); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if observer.started.PluginID != "family" || observer.started.PackID != "official" || observer.started.Operation != "Plugin.Ping" {
+		t.Fatalf("activity = %#v", observer.started)
+	}
+	if observer.completed != 1 {
+		t.Fatalf("completed = %d", observer.completed)
+	}
+}
+
 type blockingRPCServer struct {
 	release <-chan struct{}
+}
+
+type immediateRPCServer struct{}
+
+func (*immediateRPCServer) Ping(_ Empty, _ *Empty) error { return nil }
+
+type recordingActivityObserver struct {
+	started   PluginActivityStartInfo
+	completed int
+}
+
+func (o *recordingActivityObserver) PluginActivityStarted(info PluginActivityStartInfo) func() {
+	o.started = info
+	return func() { o.completed++ }
 }
 
 func (s *blockingRPCServer) Wait(_ Empty, _ *Empty) error {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go"
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
@@ -12,7 +13,7 @@ import (
 
 func (c *Client) Manifest() (pluginsdk.Manifest, error) {
 	var reply JSONReply
-	if err := c.client.Call("Plugin.Manifest", Empty{}, &reply); err != nil {
+	if err := c.call(context.Background(), "Plugin.Manifest", Empty{}, &reply); err != nil {
 		return pluginsdk.Manifest{}, err
 	}
 	var out pluginsdk.Manifest
@@ -24,7 +25,7 @@ func (c *Client) Manifest() (pluginsdk.Manifest, error) {
 
 func (c *Client) ConfigSchema() (pluginsdk.ConfigSchema, error) {
 	var reply JSONReply
-	if err := c.client.Call("Plugin.ConfigSchema", Empty{}, &reply); err != nil {
+	if err := c.call(context.Background(), "Plugin.ConfigSchema", Empty{}, &reply); err != nil {
 		return pluginsdk.ConfigSchema{}, err
 	}
 	var out pluginsdk.ConfigSchema
@@ -89,7 +90,7 @@ func (c *Client) FieldOptions(inst pluginsdk.Instance, secrets pluginsdk.SecretR
 		return nil, err
 	}
 	var reply JSONReply
-	if err := c.client.Call("Plugin.FieldOptions", FieldOptionsRequest{Instance: payload, Field: field}, &reply); err != nil {
+	if err := c.call(context.Background(), "Plugin.FieldOptions", FieldOptionsRequest{Instance: payload, Field: field}, &reply); err != nil {
 		return nil, err
 	}
 	var out []pluginsdk.Option
@@ -205,6 +206,21 @@ func (c *Client) RendererRenderContext(ctx context.Context, inst pluginsdk.Insta
 func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply any) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	var activityDone func()
+	if c.activityObserver != nil {
+		activityDone = c.activityObserver.PluginActivityStarted(PluginActivityStartInfo{
+			PluginID:   c.manifest.ID,
+			PluginName: c.manifest.Name,
+			PackID:     c.packID,
+			Operation:  serviceMethod,
+			ScopeType:  c.scopeType,
+			ScopeID:    c.scopeID,
+			StartedAt:  time.Now(),
+		})
+	}
+	if activityDone != nil {
+		defer activityDone()
 	}
 	call := c.client.Go(serviceMethod, args, reply, nil)
 	select {
@@ -332,7 +348,7 @@ func (p *storageProvider) TestConnection(ctx context.Context) error {
 			return err
 		}
 		var reply Empty
-		return c.client.Call("Plugin.StorageTest", payload, &reply)
+		return c.call(ctx, "Plugin.StorageTest", payload, &reply)
 	})
 }
 
@@ -344,7 +360,7 @@ func (p *storageProvider) Info(ctx context.Context) (providers.StorageInfo, erro
 			return err
 		}
 		var reply JSONReply
-		if err := c.client.Call("Plugin.StorageInfo", payload, &reply); err != nil {
+		if err := c.call(ctx, "Plugin.StorageInfo", payload, &reply); err != nil {
 			return err
 		}
 		return decodeJSON(reply.Data, &out)
@@ -359,7 +375,7 @@ func (p *storageProvider) EnsureMounted(ctx context.Context) error {
 			return err
 		}
 		var reply Empty
-		return c.client.Call("Plugin.StorageEnsureMounted", payload, &reply)
+		return c.call(ctx, "Plugin.StorageEnsureMounted", payload, &reply)
 	})
 }
 
@@ -370,7 +386,7 @@ func (p *storageProvider) Unmount(ctx context.Context) error {
 			return err
 		}
 		var reply Empty
-		return c.client.Call("Plugin.StorageUnmount", payload, &reply)
+		return c.call(ctx, "Plugin.StorageUnmount", payload, &reply)
 	})
 }
 
@@ -382,7 +398,7 @@ func (p *storageProvider) Stat(ctx context.Context, name string) (providers.Stor
 			return err
 		}
 		var reply JSONReply
-		if err := c.client.Call("Plugin.StorageStat", req, &reply); err != nil {
+		if err := c.call(ctx, "Plugin.StorageStat", req, &reply); err != nil {
 			return err
 		}
 		return decodeJSON(reply.Data, &out)
@@ -398,7 +414,7 @@ func (p *storageProvider) ListDir(ctx context.Context, path string) ([]providers
 			return err
 		}
 		var reply JSONReply
-		if err := c.client.Call("Plugin.StorageListDir", req, &reply); err != nil {
+		if err := c.call(ctx, "Plugin.StorageListDir", req, &reply); err != nil {
 			return err
 		}
 		return decodeJSON(reply.Data, &out)
@@ -425,7 +441,7 @@ func (p *storageProvider) OpenReader(ctx context.Context, name string) (io.ReadC
 		return nil, err
 	}
 	var reply BrokerReply
-	if err := running.client.client.Call("Plugin.StorageOpenReader", req, &reply); err != nil {
+	if err := running.client.call(ctx, "Plugin.StorageOpenReader", req, &reply); err != nil {
 		running.Close()
 		return nil, err
 	}
@@ -448,7 +464,7 @@ func (p *storageProvider) OpenWriter(ctx context.Context, name string) (io.Write
 		return nil, err
 	}
 	var reply BrokerReply
-	if err := running.client.client.Call("Plugin.StorageOpenWriter", req, &reply); err != nil {
+	if err := running.client.call(ctx, "Plugin.StorageOpenWriter", req, &reply); err != nil {
 		running.Close()
 		return nil, err
 	}
@@ -485,7 +501,7 @@ func (p *storageProvider) Upload(ctx context.Context, name string, source provid
 		sourceID := c.broker.NextId()
 		go c.broker.AcceptAndServe(sourceID, &uploadSourceServer{ctx: ctx, source: source, broker: c.broker})
 		var reply Empty
-		return c.client.Call("Plugin.StorageUpload", StorageUploadRequest{
+		return c.call(ctx, "Plugin.StorageUpload", StorageUploadRequest{
 			Instance:             payload,
 			Path:                 name,
 			UploadSourceBrokerID: sourceID,
@@ -501,7 +517,7 @@ func (p *storageProvider) ResolvePlaybackURL(ctx context.Context, input provider
 			return err
 		}
 		var reply JSONReply
-		if err := c.client.Call("Plugin.StorageResolvePlaybackURL", StoragePlaybackURLRequest{
+		if err := c.call(ctx, "Plugin.StorageResolvePlaybackURL", StoragePlaybackURLRequest{
 			Instance: payload,
 			Input:    input,
 		}, &reply); err != nil {
@@ -519,7 +535,7 @@ func (p *storageProvider) callPath(ctx context.Context, operation, method, path 
 			return err
 		}
 		var reply Empty
-		return c.client.Call(method, req, &reply)
+		return c.call(ctx, method, req, &reply)
 	})
 }
 
@@ -530,7 +546,7 @@ func (p *storageProvider) callRename(ctx context.Context, operation, method, old
 			return err
 		}
 		var reply Empty
-		return c.client.Call(method, StorageRenameRequest{Instance: payload, OldPath: oldpath, NewPath: newpath}, &reply)
+		return c.call(ctx, method, StorageRenameRequest{Instance: payload, OldPath: oldpath, NewPath: newpath}, &reply)
 	})
 }
 
