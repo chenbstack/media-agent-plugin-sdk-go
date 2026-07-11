@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go"
+	runtimesdk "github.com/chenbstack/media-agent-plugin-sdk-go/runtime"
 )
 
 type hostServicesServer struct {
@@ -24,6 +25,11 @@ type hostServicesServer struct {
 	kv                pluginsdk.KVStore
 	db                pluginsdk.PluginDB
 	logger            pluginsdk.Logger
+	siteAccounts      pluginsdk.SiteAccounts
+	subscriptions     pluginsdk.Subscriptions
+	downloads         pluginsdk.Downloads
+	transfers         pluginsdk.Transfers
+	rules             pluginsdk.Rules
 }
 
 type RevealRequest struct {
@@ -167,6 +173,211 @@ type DBQueryReply struct {
 	RowsJSON []byte
 }
 
+type SiteAccountUpsertRequest struct {
+	Input pluginsdk.SiteAccountWrite
+}
+
+type SubscriptionUpsertRequest struct {
+	Input pluginsdk.SubscriptionWrite
+}
+
+type DownloadUpsertRequest struct {
+	Input pluginsdk.DownloadWrite
+}
+
+type DownloadFindRequest struct {
+	Hash string
+}
+
+type DownloadFindReply struct {
+	Found  bool
+	Result pluginsdk.HostWriteResult
+}
+
+type TransferUpsertRequest struct {
+	Input pluginsdk.TransferWrite
+}
+
+type RuleProfileUpsertRequest struct {
+	Input pluginsdk.RuleProfileWrite
+}
+
+type RuleSortSetRequest struct {
+	Input pluginsdk.RuleSortWrite
+}
+
+type RuleDefaultSetRequest struct {
+	Input pluginsdk.RuleDefaultWrite
+}
+
+func (s *hostServicesServer) UpsertSiteAccount(req SiteAccountUpsertRequest, reply *JSONReply) error {
+	if s.siteAccounts == nil {
+		return fmt.Errorf("宿主未提供 SiteAccounts")
+	}
+	if err := s.requireHostPermission("site.accounts.write"); err != nil {
+		return err
+	}
+	result, err := s.siteAccounts.UpsertSiteAccount(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) UpsertSubscription(req SubscriptionUpsertRequest, reply *JSONReply) error {
+	if s.subscriptions == nil {
+		return fmt.Errorf("宿主未提供 Subscriptions")
+	}
+	if err := s.requireHostPermission("subscriptions.write"); err != nil {
+		return err
+	}
+	result, err := s.subscriptions.UpsertSubscription(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) UpsertDownload(req DownloadUpsertRequest, reply *JSONReply) error {
+	if s.downloads == nil {
+		return fmt.Errorf("宿主未提供 Downloads")
+	}
+	if err := s.requireHostPermission("downloads.write"); err != nil {
+		return err
+	}
+	result, err := s.downloads.UpsertDownload(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) FindDownloadByHash(req DownloadFindRequest, reply *DownloadFindReply) error {
+	if s.downloads == nil {
+		return fmt.Errorf("宿主未提供 Downloads")
+	}
+	if err := s.requireHostPermission("downloads.read"); err != nil {
+		return err
+	}
+	result, found, err := s.downloads.FindDownloadByHash(s.ctx, req.Hash)
+	if err != nil {
+		return err
+	}
+	reply.Found = found
+	reply.Result = result
+	return nil
+}
+
+func (s *hostServicesServer) UpsertTransfer(req TransferUpsertRequest, reply *JSONReply) error {
+	if s.transfers == nil {
+		return fmt.Errorf("宿主未提供 Transfers")
+	}
+	if err := s.requireHostPermission("transfers.write"); err != nil {
+		return err
+	}
+	result, err := s.transfers.UpsertTransfer(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) GetRuleCatalog(_ Empty, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.read"); err != nil {
+		return err
+	}
+	result, err := s.rules.GetRuleCatalog(s.ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) UpsertRuleProfile(req RuleProfileUpsertRequest, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.write"); err != nil {
+		return err
+	}
+	result, err := s.rules.UpsertRuleProfile(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) SetRuleSort(req RuleSortSetRequest, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.write"); err != nil {
+		return err
+	}
+	result, err := s.rules.SetRuleSort(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) SetRuleDefault(req RuleDefaultSetRequest, reply *JSONReply) error {
+	if s.rules == nil {
+		return fmt.Errorf("宿主未提供 Rules")
+	}
+	if err := s.requireHostPermission("rules.write"); err != nil {
+		return err
+	}
+	result, err := s.rules.SetRuleDefault(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *hostServicesServer) DBQuery(req DBExecRequest, reply *DBQueryReply) error {
 	if s.db == nil {
 		return fmt.Errorf("宿主未提供 PluginDB")
@@ -239,6 +450,13 @@ func (s *hostServicesServer) requireSecretPermission() error {
 		return nil
 	}
 	return fmt.Errorf("插件未声明权限: secret")
+}
+
+func (s *hostServicesServer) requireHostPermission(permission string) error {
+	if !s.permissions.HasHost(permission) {
+		return fmt.Errorf("插件未声明权限: host.%s", permission)
+	}
+	return s.requireUserGrant("host." + permission)
 }
 
 func (s *hostServicesServer) requireUserGrant(permission string) error {
@@ -340,6 +558,110 @@ func (c *hostServicesClient) Query(ctx context.Context, statement string, args .
 	return decodeDBRows(reply.RowsJSON)
 }
 
+func (c *hostServicesClient) UpsertSiteAccount(ctx context.Context, input pluginsdk.SiteAccountWrite) (pluginsdk.HostWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.UpsertSiteAccount", SiteAccountUpsertRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	var result pluginsdk.HostWriteResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) UpsertSubscription(ctx context.Context, input pluginsdk.SubscriptionWrite) (pluginsdk.HostWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.UpsertSubscription", SubscriptionUpsertRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	var result pluginsdk.HostWriteResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) UpsertDownload(ctx context.Context, input pluginsdk.DownloadWrite) (pluginsdk.HostWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.UpsertDownload", DownloadUpsertRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	var result pluginsdk.HostWriteResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) FindDownloadByHash(ctx context.Context, hash string) (pluginsdk.HostWriteResult, bool, error) {
+	var reply DownloadFindReply
+	if err := c.client.Call("Plugin.FindDownloadByHash", DownloadFindRequest{Hash: hash}, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, false, err
+	}
+	return reply.Result, reply.Found, nil
+}
+
+func (c *hostServicesClient) UpsertTransfer(ctx context.Context, input pluginsdk.TransferWrite) (pluginsdk.HostWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.UpsertTransfer", TransferUpsertRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	var result pluginsdk.HostWriteResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) GetRuleCatalog(ctx context.Context) (pluginsdk.RuleCatalog, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.GetRuleCatalog", Empty{}, &reply); err != nil {
+		return pluginsdk.RuleCatalog{}, err
+	}
+	var result pluginsdk.RuleCatalog
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.RuleCatalog{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) UpsertRuleProfile(ctx context.Context, input pluginsdk.RuleProfileWrite) (pluginsdk.HostWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.UpsertRuleProfile", RuleProfileUpsertRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	var result pluginsdk.HostWriteResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) SetRuleSort(ctx context.Context, input pluginsdk.RuleSortWrite) (pluginsdk.RuleSortResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.SetRuleSort", RuleSortSetRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.RuleSortResult{}, err
+	}
+	var result pluginsdk.RuleSortResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.RuleSortResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) SetRuleDefault(ctx context.Context, input pluginsdk.RuleDefaultWrite) (pluginsdk.RuleDefaultResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.SetRuleDefault", RuleDefaultSetRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.RuleDefaultResult{}, err
+	}
+	var result pluginsdk.RuleDefaultResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.RuleDefaultResult{}, err
+	}
+	return result, nil
+}
+
 func (c *hostServicesClient) Log(ctx context.Context, level pluginsdk.LogLevel, message string, attrs ...any) {
 	var reply Empty
 	_ = c.client.Call("Plugin.Log", LogRequest{
@@ -363,6 +685,32 @@ func (c *hostServicesClient) Warn(ctx context.Context, message string, attrs ...
 
 func (c *hostServicesClient) Error(ctx context.Context, message string, attrs ...any) {
 	c.Log(ctx, pluginsdk.LogLevelError, message, attrs...)
+}
+
+// runtimeFeedbackClient adapts the Runtime SDK feedback levels to the legacy
+// logger RPC while keeping Toast and Notify on the same host-services channel.
+type runtimeFeedbackClient struct{ host *hostServicesClient }
+
+func (c *runtimeFeedbackClient) Log(ctx context.Context, level runtimesdk.LogLevel, message string, attrs ...any) {
+	c.host.Log(ctx, pluginsdk.LogLevel(level), message, attrs...)
+}
+func (c *runtimeFeedbackClient) Debug(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogDebug, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Info(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogInfo, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Warn(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogWarn, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Error(ctx context.Context, message string, attrs ...any) {
+	c.Log(ctx, runtimesdk.LogError, message, attrs...)
+}
+func (c *runtimeFeedbackClient) Toast(context.Context, runtimesdk.ToastInput) error {
+	return fmt.Errorf("宿主尚未提供 Toast 能力")
+}
+func (c *runtimeFeedbackClient) Notify(context.Context, runtimesdk.NotificationInput) error {
+	return fmt.Errorf("宿主尚未提供通知能力")
 }
 
 func logAttrs(attrs []any) []LogAttr {

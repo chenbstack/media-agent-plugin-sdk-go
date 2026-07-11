@@ -15,6 +15,19 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
+	runtimesdk "github.com/chenbstack/media-agent-plugin-sdk-go/runtime"
+)
+
+const (
+	CategorySiteMetadata = "site-metadata"
+	CategoryDownloader   = "downloader"
+	CategoryMediaServer  = "media-server"
+	CategoryStorage      = "storage"
+	CategorySubtitle     = "subtitle"
+	CategoryNotification = "notification"
+	CategoryAIModel      = "ai-model"
+	CategoryAutomation   = "automation"
+	CategoryOther        = "other"
 )
 
 type Manifest struct {
@@ -22,6 +35,8 @@ type Manifest struct {
 	Name          string              `yaml:"name" json:"name"`
 	Version       string              `yaml:"version" json:"version"`
 	Description   string              `yaml:"description" json:"description,omitempty"`
+	Category      string              `yaml:"category,omitempty" json:"category,omitempty"`
+	Tags          []string            `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Type          string              `yaml:"type" json:"type"` // builtin / cli / rule / ui
 	Entry         map[string]string   `yaml:"entry,omitempty" json:"entry,omitempty"`
 	Protocol      string              `yaml:"protocol,omitempty" json:"protocol,omitempty"`
@@ -34,6 +49,7 @@ type Manifest struct {
 	UI            *UIExtension        `yaml:"ui,omitempty" json:"ui,omitempty"`
 	Identity      *IdentityExtension  `yaml:"identity,omitempty" json:"identity,omitempty"`
 	Entitlements  []string            `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
+	Actions       []ActionDefinition  `yaml:"actions,omitempty" json:"actions,omitempty"`
 	Permissions   Permissions         `yaml:"permissions" json:"permissions"`
 	Resources     Resources           `yaml:"resources" json:"resources"`
 	Install       *InstallInfo        `yaml:"install,omitempty" json:"install,omitempty"`
@@ -283,13 +299,19 @@ type KVStore interface {
 // Instance 是一个已校验的连接实例配置（downloaders/media_servers 表中的一行）。
 // Config 中 secret 字段的值是 secrets 表引用，需通过 SecretResolver 解密。
 type Instance struct {
-	ID       string
-	Name     string
-	Config   map[string]any
-	KV       KVStore
-	DB       PluginDB
-	Logger   Logger
-	Settings Settings
+	ID            string
+	Name          string
+	Config        map[string]any
+	KV            KVStore
+	DB            PluginDB
+	Logger        Logger
+	Settings      Settings
+	SiteAccounts  SiteAccounts
+	Subscriptions Subscriptions
+	Downloads     Downloads
+	Transfers     Transfers
+	Rules         Rules
+	Runtime       *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。
@@ -343,6 +365,7 @@ type Plugin struct {
 	NewRenderer        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.RendererProvider, error)
 	NewAPI             func(ctx context.Context, inst Instance, secrets SecretResolver) (APIProvider, error)
 	NewIdentity        func(ctx context.Context, inst Instance, secrets SecretResolver) (IdentityProvider, error)
+	NewActionHandler   func(ctx context.Context, inst Instance, secrets SecretResolver) (ActionHandler, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。
@@ -463,6 +486,21 @@ func (p Plugin) Validate() error {
 	}
 	if err := m.validateExtensions(capabilities); err != nil {
 		return err
+	}
+	seenActions := map[string]bool{}
+	for _, action := range m.Actions {
+		if action.ID == "" || action.Name == "" {
+			return fmt.Errorf("插件 %s: action 必须包含 id 和 name", m.ID)
+		}
+		if seenActions[action.ID] {
+			return fmt.Errorf("插件 %s: action id 重复 %q", m.ID, action.ID)
+		}
+		seenActions[action.ID] = true
+		if action.Permissions != nil {
+			if err := validatePermissionSubset(m.Permissions, *action.Permissions); err != nil {
+				return fmt.Errorf("插件 %s action %s 权限声明无效: %w", m.ID, action.ID, err)
+			}
+		}
 	}
 	return p.ConfigSchema.validate(m.ID)
 }

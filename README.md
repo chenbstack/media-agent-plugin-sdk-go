@@ -12,11 +12,13 @@ go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.1.0
 ## Packages
 
 - The root `pluginsdk` package defines manifests, configuration schemas,
-  lifecycle hooks, host services, and plugin registration.
+  lifecycle hooks, host services, actions, and plugin registration.
 - `providers` defines the provider contracts exposed to the host.
 - `providers/fake` provides in-memory implementations for tests.
 - `pluginrpc` runs plugins out of process with HashiCorp `go-plugin` and Go
   `net/rpc`.
+- `runtime` defines cross-cutting runtime contracts such as feedback
+  (logging, Toast, notifications), progress, and action context.
 
 ## Compatibility
 
