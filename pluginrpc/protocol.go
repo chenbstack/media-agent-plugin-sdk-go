@@ -295,6 +295,51 @@ type SiteSearchRequest struct {
 	Request  providers.TorrentSearchRequest
 }
 
+type NotifierSendRequest struct {
+	Instance InstancePayload
+	Message  providers.NotificationMessage
+}
+
+type SubtitleSearchRequest struct {
+	Instance InstancePayload
+	Request  providers.SubtitleSearchRequest
+}
+
+type SubtitleDownloadRequest struct {
+	Instance InstancePayload
+	Result   providers.SubtitleResult
+}
+
+// The model provider contracts carry an optional func() time.Time so in-process
+// callers can inject a deterministic clock. Functions cannot cross net/rpc, so
+// the transport evaluates the clock once and reconstructs a fixed clock in the
+// plugin process. Production callers normally leave Now nil.
+type ModelGenerateRequest struct {
+	Model     providers.ModelConfig
+	Prompt    string
+	MaxTokens int
+	Now       time.Time
+	HasNow    bool
+}
+
+type ModelDownloadRequest struct {
+	Model          providers.ModelConfig
+	TimeoutSeconds int
+	Now            time.Time
+	HasNow         bool
+}
+
+type ModelUninstallRequest struct {
+	Model          providers.ModelConfig
+	TimeoutSeconds int
+	Now            time.Time
+	HasNow         bool
+}
+
+type ModelConfigRequest struct {
+	Model providers.ModelConfig
+}
+
 // APIHandleRequest wraps the host-filtered api.endpoint DTO with the plugin
 // instance payload used by every other instance-scoped RPC.
 type APIHandleRequest struct {
@@ -833,7 +878,7 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	}
 	if out.HasCapability("storage") {
 		out.NewStorage = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.StorageProvider, error) {
-			return &storageProvider{external: e, inst: inst, secrets: secrets}, nil
+			return &storageProvider{session: externalStorageProviderSession{external: e}, inst: inst, secrets: secrets}, nil
 		}
 	}
 	providerSession := externalProviderSession{external: e}
@@ -855,6 +900,21 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	if out.HasCapability("site") {
 		out.NewSite = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.SiteProvider, error) {
 			return &siteProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasCapability("notifier") {
+		out.NewNotifier = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.NotifierProvider, error) {
+			return &notifierProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasCapability("subtitle_source") {
+		out.NewSubtitleSource = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.SubtitleSourceProvider, error) {
+			return &subtitleSourceProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasCapability("model_provider") {
+		out.NewModel = func() providers.ModelProvider {
+			return &modelProvider{session: providerSession}
 		}
 	}
 	if out.HasExactCapability(pluginsdk.CapabilityAPIEndpoint) {

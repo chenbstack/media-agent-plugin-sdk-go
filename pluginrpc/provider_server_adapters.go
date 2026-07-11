@@ -3,6 +3,7 @@ package pluginrpc
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
@@ -255,6 +256,112 @@ func (s *rpcServer) SiteSearch(req SiteSearchRequest, reply *JSONReply) error {
 	return setJSONReply(reply, value, callErr)
 }
 
+func (s *rpcServer) NotifierTest(req InstancePayload, _ *Empty) error {
+	p, closeFn, err := s.notifier(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return p.TestConnection(context.Background())
+}
+
+func (s *rpcServer) NotifierSend(req NotifierSendRequest, _ *Empty) error {
+	p, closeFn, err := s.notifier(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return p.Send(context.Background(), req.Message)
+}
+
+func (s *rpcServer) SubtitleSourceTest(req InstancePayload, _ *Empty) error {
+	p, closeFn, err := s.subtitleSource(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return p.TestConnection(context.Background())
+}
+
+func (s *rpcServer) SubtitleSourceSearch(req SubtitleSearchRequest, reply *JSONReply) error {
+	p, closeFn, err := s.subtitleSource(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	value, callErr := p.Search(context.Background(), req.Request)
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) SubtitleSourceDownload(req SubtitleDownloadRequest, reply *JSONReply) error {
+	p, closeFn, err := s.subtitleSource(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	value, callErr := p.Download(context.Background(), req.Result)
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) ModelKind(_ Empty, reply *StringReply) error {
+	p, err := s.model()
+	if err != nil {
+		return err
+	}
+	reply.Value = p.Kind()
+	return nil
+}
+
+func (s *rpcServer) ModelValidate(req ModelConfigRequest, _ *Empty) error {
+	p, err := s.model()
+	if err != nil {
+		return err
+	}
+	return p.ValidateModel(req.Model)
+}
+
+func (s *rpcServer) ModelGenerate(req ModelGenerateRequest, reply *JSONReply) error {
+	p, err := s.model()
+	if err != nil {
+		return err
+	}
+	value, callErr := p.Generate(context.Background(), providers.ModelGenerateRequest{
+		Model: req.Model, Prompt: req.Prompt, MaxTokens: req.MaxTokens, Now: restoreClock(req.Now, req.HasNow),
+	})
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) ModelDownload(req ModelDownloadRequest, reply *JSONReply) error {
+	p, err := s.model()
+	if err != nil {
+		return err
+	}
+	value, callErr := p.Download(context.Background(), providers.ModelDownloadRequest{
+		Model: req.Model, TimeoutSeconds: req.TimeoutSeconds, Now: restoreClock(req.Now, req.HasNow),
+	})
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) ModelUninstall(req ModelUninstallRequest, reply *JSONReply) error {
+	p, err := s.model()
+	if err != nil {
+		return err
+	}
+	value, callErr := p.Uninstall(context.Background(), providers.ModelUninstallRequest{
+		Model: req.Model, TimeoutSeconds: req.TimeoutSeconds, Now: restoreClock(req.Now, req.HasNow),
+	})
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) ModelCommandDisplay(req ModelConfigRequest, reply *StringReply) error {
+	p, err := s.model()
+	if err != nil {
+		return err
+	}
+	reply.Value = p.CommandDisplay(req.Model)
+	return nil
+}
+
 func setJSONReply[T any](reply *JSONReply, value T, callErr error) error {
 	if callErr != nil {
 		return callErr
@@ -329,4 +436,54 @@ func (s *rpcServer) site(payload InstancePayload) (providers.SiteProvider, func(
 		return nil, nil, err
 	}
 	return provider, closeFn, nil
+}
+
+func (s *rpcServer) notifier(payload InstancePayload) (providers.NotifierProvider, func(), error) {
+	if s.plugin.NewNotifier == nil {
+		return nil, nil, fmt.Errorf("插件未实现 NotifierProvider")
+	}
+	inst, secrets, closeFn, err := s.instance(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	provider, err := s.plugin.NewNotifier(context.Background(), inst, secrets)
+	if err != nil {
+		closeFn()
+		return nil, nil, err
+	}
+	return provider, closeFn, nil
+}
+
+func (s *rpcServer) subtitleSource(payload InstancePayload) (providers.SubtitleSourceProvider, func(), error) {
+	if s.plugin.NewSubtitleSource == nil {
+		return nil, nil, fmt.Errorf("插件未实现 SubtitleSourceProvider")
+	}
+	inst, secrets, closeFn, err := s.instance(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	provider, err := s.plugin.NewSubtitleSource(context.Background(), inst, secrets)
+	if err != nil {
+		closeFn()
+		return nil, nil, err
+	}
+	return provider, closeFn, nil
+}
+
+func (s *rpcServer) model() (providers.ModelProvider, error) {
+	if s.plugin.NewModel == nil {
+		return nil, fmt.Errorf("插件未实现 ModelProvider")
+	}
+	provider := s.plugin.NewModel()
+	if provider == nil {
+		return nil, fmt.Errorf("插件返回了空 ModelProvider")
+	}
+	return provider, nil
+}
+
+func restoreClock(now time.Time, ok bool) func() time.Time {
+	if !ok {
+		return nil
+	}
+	return func() time.Time { return now }
 }

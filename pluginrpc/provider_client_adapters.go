@@ -3,6 +3,9 @@ package pluginrpc
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
 
 	pluginsdk "github.com/chenbstack/media-agent-plugin-sdk-go"
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
@@ -38,6 +41,57 @@ func (s directProviderSession) withClient(_ context.Context, _ string, fn func(*
 	return fn(s.client)
 }
 
+// storageProviderSession extends the normal provider session with a leased
+// client for streaming operations. Standalone plugins keep their short-lived
+// process alive until the stream closes, while Pack plugins lease the already
+// dispensed client and therefore never start or stop another OS process.
+type storageProviderSession interface {
+	pluginID() string
+	withClientForScope(ctx context.Context, scopeType, scopeID, operation string, fn func(*Client) error) error
+	leaseClientForScope(ctx context.Context, scopeType, scopeID, operation string) (*Client, func(), error)
+}
+
+type externalStorageProviderSession struct{ external ExternalPlugin }
+
+func (s externalStorageProviderSession) pluginID() string { return s.external.Manifest.ID }
+func (s externalStorageProviderSession) withClientForScope(ctx context.Context, scopeType, scopeID, operation string, fn func(*Client) error) error {
+	return s.external.withClientForScopeOperation(ctx, scopeType, scopeID, operation, fn)
+}
+func (s externalStorageProviderSession) leaseClientForScope(ctx context.Context, scopeType, scopeID, operation string) (*Client, func(), error) {
+	running, err := s.external.startClientForScopeOperation(ctx, scopeType, scopeID, operation)
+	if err != nil {
+		return nil, nil, err
+	}
+	return running.client, running.Close, nil
+}
+
+type directStorageProviderSession struct{ client *Client }
+
+func (s directStorageProviderSession) pluginID() string {
+	if s.client == nil {
+		return ""
+	}
+	return s.client.manifest.ID
+}
+func (s directStorageProviderSession) withClientForScope(_ context.Context, _, _, _ string, fn func(*Client) error) error {
+	if s.client == nil {
+		return fmt.Errorf("插件 RPC 客户端为空")
+	}
+	return fn(s.client)
+}
+func (s directStorageProviderSession) leaseClientForScope(_ context.Context, _, _, _ string) (*Client, func(), error) {
+	if s.client == nil {
+		return nil, nil, fmt.Errorf("插件 RPC 客户端为空")
+	}
+	return s.client, func() {}, nil
+}
+
+// Storage creates a Pack-safe StorageProvider adapter. File streams and
+// HostServices broker calls share this Client's persistent Pack connection.
+func (c *Client) Storage(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) providers.StorageProvider {
+	return &storageProvider{session: directStorageProviderSession{client: c}, inst: inst, secrets: secrets}
+}
+
 // Downloader creates the same DownloaderProvider adapter used by standalone
 // ExternalPlugin. On a Pack client it reuses the already running Pack process.
 func (c *Client) Downloader(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) providers.DownloaderProvider {
@@ -57,6 +111,22 @@ func (c *Client) Metadata(inst pluginsdk.Instance, secrets pluginsdk.SecretResol
 // Site creates a Pack-safe SiteProvider adapter.
 func (c *Client) Site(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) providers.SiteProvider {
 	return &siteProvider{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
+}
+
+// Notifier creates a Pack-safe NotifierProvider adapter.
+func (c *Client) Notifier(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) providers.NotifierProvider {
+	return &notifierProvider{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
+}
+
+// SubtitleSource creates a Pack-safe SubtitleSourceProvider adapter.
+func (c *Client) SubtitleSource(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) providers.SubtitleSourceProvider {
+	return &subtitleSourceProvider{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
+}
+
+// Model creates a Pack-safe ModelProvider adapter. Model providers are not
+// instance-scoped, matching Plugin.NewModel's factory contract.
+func (c *Client) Model() providers.ModelProvider {
+	return &modelProvider{session: directProviderSession{client: c}}
 }
 
 type downloaderProvider struct {
@@ -362,4 +432,204 @@ func (p *siteProvider) withPayload(ctx context.Context, operation string, fn fun
 		}
 		return fn(c, instance)
 	})
+}
+
+type notifierProvider struct {
+	session providerSession
+	inst    pluginsdk.Instance
+	secrets pluginsdk.SecretResolver
+}
+
+var _ providers.NotifierProvider = (*notifierProvider)(nil)
+
+func (p *notifierProvider) Kind() string { return p.session.pluginID() }
+func (p *notifierProvider) TestConnection(ctx context.Context) error {
+	return p.withPayload(ctx, "notifier.test", func(c *Client, instance InstancePayload) error {
+		var reply Empty
+		return c.call(ctx, "Plugin.NotifierTest", instance, &reply)
+	})
+}
+func (p *notifierProvider) Send(ctx context.Context, message providers.NotificationMessage) error {
+	return p.withPayload(ctx, "notifier.send", func(c *Client, instance InstancePayload) error {
+		var reply Empty
+		return c.call(ctx, "Plugin.NotifierSend", NotifierSendRequest{Instance: instance, Message: message}, &reply)
+	})
+}
+func (p *notifierProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
+	return p.session.withClient(ctx, operation, func(c *Client) error {
+		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		return fn(c, instance)
+	})
+}
+
+type subtitleSourceProvider struct {
+	session providerSession
+	inst    pluginsdk.Instance
+	secrets pluginsdk.SecretResolver
+}
+
+var _ providers.SubtitleSourceProvider = (*subtitleSourceProvider)(nil)
+
+func (p *subtitleSourceProvider) Kind() string { return p.session.pluginID() }
+func (p *subtitleSourceProvider) TestConnection(ctx context.Context) error {
+	return p.withPayload(ctx, "subtitle_source.test", func(c *Client, instance InstancePayload) error {
+		var reply Empty
+		return c.call(ctx, "Plugin.SubtitleSourceTest", instance, &reply)
+	})
+}
+func (p *subtitleSourceProvider) Search(ctx context.Context, request providers.SubtitleSearchRequest) ([]providers.SubtitleResult, error) {
+	var out []providers.SubtitleResult
+	err := p.withPayload(ctx, "subtitle_source.search", func(c *Client, instance InstancePayload) error {
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.SubtitleSourceSearch", SubtitleSearchRequest{Instance: instance, Request: request}, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, err
+}
+func (p *subtitleSourceProvider) Download(ctx context.Context, result providers.SubtitleResult) ([]byte, error) {
+	var out []byte
+	err := p.withPayload(ctx, "subtitle_source.download", func(c *Client, instance InstancePayload) error {
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.SubtitleSourceDownload", SubtitleDownloadRequest{Instance: instance, Result: result}, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, err
+}
+func (p *subtitleSourceProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
+	return p.session.withClient(ctx, operation, func(c *Client) error {
+		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		return fn(c, instance)
+	})
+}
+
+type modelProvider struct {
+	session  providerSession
+	kindOnce sync.Once
+	kind     string
+}
+
+var _ providers.ModelProvider = (*modelProvider)(nil)
+
+func (p *modelProvider) Kind() string {
+	p.kindOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_ = p.session.withClient(ctx, "model_provider.kind", func(c *Client) error {
+			var reply StringReply
+			if err := c.call(ctx, "Plugin.ModelKind", Empty{}, &reply); err != nil {
+				return err
+			}
+			p.kind = reply.Value
+			return nil
+		})
+		if p.kind == "" {
+			p.kind = p.session.pluginID()
+		}
+	})
+	return p.kind
+}
+
+func (p *modelProvider) ValidateModel(model providers.ModelConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err := p.session.withClient(ctx, "model_provider.validate", func(c *Client) error {
+		var reply Empty
+		return c.call(ctx, "Plugin.ModelValidate", ModelConfigRequest{Model: model}, &reply)
+	})
+	return normalizeModelError(err)
+}
+
+func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGenerateRequest) (providers.ModelGenerateResult, error) {
+	var out providers.ModelGenerateResult
+	err := p.session.withClient(ctx, "model_provider.generate", func(c *Client) error {
+		wire := ModelGenerateRequest{Model: request.Model, Prompt: request.Prompt, MaxTokens: request.MaxTokens}
+		wire.Now, wire.HasNow = snapshotClock(request.Now)
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.ModelGenerate", wire, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, normalizeModelError(err)
+}
+
+func (p *modelProvider) Download(ctx context.Context, request providers.ModelDownloadRequest) (providers.ModelDownloadResult, error) {
+	var out providers.ModelDownloadResult
+	err := p.session.withClient(ctx, "model_provider.download", func(c *Client) error {
+		wire := ModelDownloadRequest{Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
+		wire.Now, wire.HasNow = snapshotClock(request.Now)
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.ModelDownload", wire, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, normalizeModelError(err)
+}
+
+func (p *modelProvider) Uninstall(ctx context.Context, request providers.ModelUninstallRequest) (providers.ModelUninstallResult, error) {
+	var out providers.ModelUninstallResult
+	err := p.session.withClient(ctx, "model_provider.uninstall", func(c *Client) error {
+		wire := ModelUninstallRequest{Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
+		wire.Now, wire.HasNow = snapshotClock(request.Now)
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.ModelUninstall", wire, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, normalizeModelError(err)
+}
+
+func (p *modelProvider) CommandDisplay(model providers.ModelConfig) string {
+	var out string
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_ = p.session.withClient(ctx, "model_provider.command_display", func(c *Client) error {
+		var reply StringReply
+		if err := c.call(ctx, "Plugin.ModelCommandDisplay", ModelConfigRequest{Model: model}, &reply); err != nil {
+			return err
+		}
+		out = reply.Value
+		return nil
+	})
+	return out
+}
+
+func snapshotClock(now func() time.Time) (time.Time, bool) {
+	if now == nil {
+		return time.Time{}, false
+	}
+	return now(), true
+}
+
+// net/rpc serializes server errors as text. Reattach the SDK's stable model
+// sentinels so hosts can keep using errors.Is for HTTP/status classification.
+func normalizeModelError(err error) error {
+	if err == nil {
+		return nil
+	}
+	for _, sentinel := range []error{
+		providers.ErrModelProviderInvalidInput,
+		providers.ErrModelProviderNotConfigured,
+		providers.ErrModelProviderRuntimeMissing,
+		providers.ErrModelProviderDownloadFailed,
+		providers.ErrModelProviderUninstallFailed,
+		providers.ErrModelProviderGenerationFailed,
+	} {
+		if strings.Contains(err.Error(), sentinel.Error()) {
+			return fmt.Errorf("%w: %v", sentinel, err)
+		}
+	}
+	return err
 }

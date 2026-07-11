@@ -288,9 +288,9 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 }
 
 type storageProvider struct {
-	external ExternalPlugin
-	inst     pluginsdk.Instance
-	secrets  pluginsdk.SecretResolver
+	session storageProviderSession
+	inst    pluginsdk.Instance
+	secrets pluginsdk.SecretResolver
 }
 
 type cookieSourceProvider struct {
@@ -385,7 +385,7 @@ func (p *cookieSourceProvider) Snapshot(ctx context.Context) (providers.CookieSn
 }
 
 func (p *storageProvider) Kind() string {
-	return p.external.Manifest.ID
+	return p.session.pluginID()
 }
 
 func (p *storageProvider) TestConnection(ctx context.Context) error {
@@ -603,7 +603,7 @@ func (p *storageProvider) withClient(ctx context.Context, fn func(*Client) error
 
 func (p *storageProvider) withClientOperation(ctx context.Context, operation string, fn func(*Client) error) error {
 	scopeType, scopeID := p.scope()
-	return p.external.withClientForScopeOperation(ctx, scopeType, scopeID, operation, fn)
+	return p.session.withClientForScope(ctx, scopeType, scopeID, operation, fn)
 }
 
 func (p *storageProvider) startClient(ctx context.Context) (*runningClient, error) {
@@ -612,7 +612,11 @@ func (p *storageProvider) startClient(ctx context.Context) (*runningClient, erro
 
 func (p *storageProvider) startClientOperation(ctx context.Context, operation string) (*runningClient, error) {
 	scopeType, scopeID := p.scope()
-	return p.external.startClientForScopeOperation(ctx, scopeType, scopeID, operation)
+	client, closeFn, err := p.session.leaseClientForScope(ctx, scopeType, scopeID, operation)
+	if err != nil {
+		return nil, err
+	}
+	return &runningClient{client: client, done: closeFn}, nil
 }
 
 func (p *storageProvider) scope() (string, string) {
