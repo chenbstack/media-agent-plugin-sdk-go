@@ -91,6 +91,65 @@ type IdentityExtension struct {
 	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
 }
 
+// APIRequest is the bounded HTTP-like request delivered to an api.endpoint
+// plugin. The host owns routing, authentication, entitlement checks and input
+// limits: Path must already be canonical and relative to the declared service,
+// Headers must contain only the host allowlist, and Body must already satisfy
+// the host's size limit. Raw http.Request, cookies and the host Authorization
+// header are intentionally never part of this contract.
+type APIRequest struct {
+	Method    string              `json:"method"`
+	Path      string              `json:"path"`
+	Query     map[string][]string `json:"query,omitempty"`
+	Headers   map[string][]string `json:"headers,omitempty"`
+	Body      []byte              `json:"body,omitempty"`
+	Principal *Principal          `json:"principal,omitempty"`
+}
+
+// APIResponse is a non-streaming plugin response. The host must validate the
+// status, cap Body and filter response headers before writing it to the client;
+// hop-by-hop headers, Set-Cookie and authentication headers are never trusted.
+type APIResponse struct {
+	Status  int                 `json:"status"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Body    []byte              `json:"body,omitempty"`
+}
+
+// APIProvider handles short, structured api.endpoint calls. Long-running,
+// streaming and WebSocket services require a separate sidecar contract.
+type APIProvider interface {
+	HandleAPI(ctx context.Context, request APIRequest) (APIResponse, error)
+}
+
+// IdentityVerifyRequest contains only a credential scheme and its minimum
+// fields. Credential is plaintext for the duration of this RPC and must never
+// be persisted or logged. Examples of Scheme are password, bearer and code.
+type IdentityVerifyRequest struct {
+	Scheme     string `json:"scheme"`
+	Identifier string `json:"identifier,omitempty"`
+	Credential string `json:"credential"`
+}
+
+// Principal is the minimum stable identity returned by an IdentityProvider.
+// Authorization roles, arbitrary claims and host session data are deliberately
+// excluded: the host maps this identity to its own authorization model.
+type Principal struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// IdentityVerification reports credential verification only. A successful
+// result does not contain or authorize a session token; the host validates the
+// principal and remains the sole session/CSRF signer.
+type IdentityVerification struct {
+	Authenticated bool       `json:"authenticated"`
+	Principal     *Principal `json:"principal,omitempty"`
+}
+
+type IdentityProvider interface {
+	VerifyIdentity(ctx context.Context, request IdentityVerifyRequest) (IdentityVerification, error)
+}
+
 // InstallInfo 是插件对其自举安装步骤（capability lifecycle.install）的自我描述。
 // 宿主不理解安装内容，安装区块的标题与说明都取自这里，而非宿主硬编码文案。
 //
@@ -282,6 +341,8 @@ type Plugin struct {
 	NewNotifier        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.NotifierProvider, error)
 	NewSubtitleSource  func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SubtitleSourceProvider, error)
 	NewRenderer        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.RendererProvider, error)
+	NewAPI             func(ctx context.Context, inst Instance, secrets SecretResolver) (APIProvider, error)
+	NewIdentity        func(ctx context.Context, inst Instance, secrets SecretResolver) (IdentityProvider, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。

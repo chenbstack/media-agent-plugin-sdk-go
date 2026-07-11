@@ -289,6 +289,18 @@ type SiteSearchRequest struct {
 	Request  providers.TorrentSearchRequest
 }
 
+// APIHandleRequest wraps the host-filtered api.endpoint DTO with the plugin
+// instance payload used by every other instance-scoped RPC.
+type APIHandleRequest struct {
+	Instance InstancePayload
+	Request  pluginsdk.APIRequest
+}
+
+type IdentityVerifyRequest struct {
+	Instance InstancePayload
+	Request  pluginsdk.IdentityVerifyRequest
+}
+
 func encodeJSON(value any) (JSONReply, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -836,6 +848,16 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	if out.HasCapability("site") {
 		out.NewSite = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.SiteProvider, error) {
 			return &siteProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasExactCapability(pluginsdk.CapabilityAPIEndpoint) {
+		out.NewAPI = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.APIProvider, error) {
+			return &apiProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasExactCapability(pluginsdk.CapabilityIdentityProvider) {
+		out.NewIdentity = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.IdentityProvider, error) {
+			return &identityProvider{session: providerSession, inst: inst, secrets: secrets}, nil
 		}
 	}
 	if out.HasExactCapability("cookie_source.fetch") {
