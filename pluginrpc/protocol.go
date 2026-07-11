@@ -206,6 +206,89 @@ type RendererRenderRequest struct {
 	Request  providers.RenderRequest
 }
 
+type DownloaderAddRequest struct {
+	Instance InstancePayload
+	Request  providers.AddTorrentRequest
+}
+
+type DownloaderHashRequest struct {
+	Instance InstancePayload
+	Hash     string
+}
+
+type DownloaderRemoveRequest struct {
+	Instance   InstancePayload
+	Hash       string
+	DeleteData bool
+}
+
+type DownloaderFileSelectionRequest struct {
+	Instance InstancePayload
+	Hash     string
+	Files    []providers.TorrentFile
+}
+
+type MediaServerItemsRequest struct {
+	Instance   InstancePayload
+	LibraryID  string
+	StartIndex int
+	Limit      int
+}
+
+type MediaServerItemsReply struct {
+	Items []providers.LibraryItem
+	Total int
+}
+
+type MediaServerSearchRequest struct {
+	Instance InstancePayload
+	Query    string
+}
+
+type MediaServerExistsRequest struct {
+	Instance InstancePayload
+	Ref      providers.MediaRef
+}
+
+type MediaServerIDRequest struct {
+	Instance   InstancePayload
+	ExternalID string
+}
+
+type MediaServerLatestRequest struct {
+	Instance InstancePayload
+	Limit    int
+}
+
+type MetadataSearchRequest struct {
+	Instance  InstancePayload
+	Query     string
+	MediaType string
+	Year      int
+}
+
+type MetadataDetailRequest struct {
+	Instance   InstancePayload
+	MediaType  string
+	ProviderID string
+}
+
+type MetadataSeasonEpisodesRequest struct {
+	Instance     InstancePayload
+	ProviderID   string
+	SeasonNumber int
+}
+
+type MetadataExternalIDRequest struct {
+	Instance InstancePayload
+	IDs      providers.MetaExternalIDs
+}
+
+type SiteSearchRequest struct {
+	Instance InstancePayload
+	Request  providers.TorrentSearchRequest
+}
+
 func encodeJSON(value any) (JSONReply, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -732,6 +815,27 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	if out.HasCapability("storage") {
 		out.NewStorage = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.StorageProvider, error) {
 			return &storageProvider{external: e, inst: inst, secrets: secrets}, nil
+		}
+	}
+	providerSession := externalProviderSession{external: e}
+	if out.HasCapability("downloader") {
+		out.NewDownloader = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.DownloaderProvider, error) {
+			return &downloaderProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasCapability("media_server") {
+		out.NewMediaServer = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.MediaServerProvider, error) {
+			return &mediaServerProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasCapability("metadata") {
+		out.NewMetadata = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.MetadataProvider, error) {
+			return &metadataProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
+	}
+	if out.HasCapability("site") {
+		out.NewSite = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.SiteProvider, error) {
+			return &siteProvider{session: providerSession, inst: inst, secrets: secrets}, nil
 		}
 	}
 	if out.HasExactCapability("cookie_source.fetch") {
