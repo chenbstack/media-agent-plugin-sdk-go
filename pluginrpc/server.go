@@ -217,6 +217,30 @@ func (s *rpcServer) RunAction(req ActionRunRequest, reply *JSONReply) error {
 	return nil
 }
 
+func (s *rpcServer) AssessOnboarding(req InstancePayload, reply *JSONReply) error {
+	if s.plugin.AssessOnboarding == nil {
+		return fmt.Errorf("插件未实现引导状态评估")
+	}
+	inst, secrets, closeFn, err := s.instance(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	result, err := s.plugin.AssessOnboarding(context.Background(), inst, secrets)
+	if err != nil {
+		return err
+	}
+	if err := result.Validate(); err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) RendererTest(req InstancePayload, reply *Empty) error {
 	provider, closeFn, err := s.renderer(req)
 	if err != nil {

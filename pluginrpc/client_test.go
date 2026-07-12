@@ -86,6 +86,31 @@ func TestClientCallReportsLogicalPackActivity(t *testing.T) {
 	}
 }
 
+func TestAssessOnboardingRoundTrip(t *testing.T) {
+	server := rpc.NewServer()
+	impl := pluginsdk.Plugin{AssessOnboarding: func(_ context.Context, inst pluginsdk.Instance, _ pluginsdk.SecretResolver) (pluginsdk.OnboardingAssessment, error) {
+		if inst.ID != "media-1" || inst.Config["base_url"] != "http://emby.local" {
+			t.Fatalf("instance = %#v", inst)
+		}
+		return pluginsdk.OnboardingAssessment{Status: pluginsdk.OnboardingSatisfied, Reason: "已迁移"}, nil
+	}}
+	if err := server.RegisterName("Plugin", &rpcServer{plugin: impl}); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	go server.ServeConn(serverConn)
+	client := &Client{client: rpc.NewClient(clientConn)}
+	defer client.client.Close()
+	result, err := client.AssessOnboardingContext(t.Context(), pluginsdk.Instance{
+		ID: "media-1", Config: map[string]any{"base_url": "http://emby.local"},
+	}, nil)
+	if err != nil || result.Status != pluginsdk.OnboardingSatisfied || result.Reason != "已迁移" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 type blockingRPCServer struct {
 	release <-chan struct{}
 }

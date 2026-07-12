@@ -31,6 +31,15 @@ Published builds should depend on an immutable tag. For local development
 across repositories, use an uncommitted `go.work` file rather than committing a
 relative `replace` directive.
 
+## Onboarding assessment
+
+A plugin that declares `onboarding.assess` may implement
+`Plugin.AssessOnboarding`. The host calls this read-only hook with each stored
+instance and uses the returned `needs_setup` or `satisfied` status to decide
+whether the plugin still needs a first-run configuration form. Plugins decide
+semantic readiness; the signed Official Release manifest owns grouping and
+ordering.
+
 ## License
 
 This repository does not currently include a software license. No permission

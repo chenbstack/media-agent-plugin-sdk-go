@@ -28,6 +28,8 @@ const (
 	CategoryAIModel      = "ai-model"
 	CategoryAutomation   = "automation"
 	CategoryOther        = "other"
+
+	CapabilityOnboardingAssessment = "onboarding.assess"
 )
 
 type Manifest struct {
@@ -332,6 +334,30 @@ type AuthCheckResult struct {
 	Config  map[string]any `json:"config,omitempty"`
 }
 
+type OnboardingAssessmentStatus string
+
+const (
+	OnboardingNeedsSetup OnboardingAssessmentStatus = "needs_setup"
+	OnboardingSatisfied  OnboardingAssessmentStatus = "satisfied"
+)
+
+// OnboardingAssessment is a plugin-owned, read-only decision about whether one
+// persisted instance already satisfies the plugin's first-run setup. The host
+// owns visibility and navigation; plugins only report semantic readiness.
+type OnboardingAssessment struct {
+	Status OnboardingAssessmentStatus `json:"status"`
+	Reason string                     `json:"reason,omitempty"`
+}
+
+func (a OnboardingAssessment) Validate() error {
+	switch a.Status {
+	case OnboardingNeedsSetup, OnboardingSatisfied:
+		return nil
+	default:
+		return fmt.Errorf("invalid onboarding assessment status %q", a.Status)
+	}
+}
+
 // InstallResult 是插件自举安装（Install）或安装检查（CheckInstall）的结果。
 // 宿主只负责触发和记录，不理解安装内容。
 type InstallResult struct {
@@ -366,6 +392,7 @@ type Plugin struct {
 	NewAPI             func(ctx context.Context, inst Instance, secrets SecretResolver) (APIProvider, error)
 	NewIdentity        func(ctx context.Context, inst Instance, secrets SecretResolver) (IdentityProvider, error)
 	NewActionHandler   func(ctx context.Context, inst Instance, secrets SecretResolver) (ActionHandler, error)
+	AssessOnboarding   func(ctx context.Context, inst Instance, secrets SecretResolver) (OnboardingAssessment, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。

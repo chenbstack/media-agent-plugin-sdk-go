@@ -173,6 +173,25 @@ func (c *Client) RunActionContext(ctx context.Context, inst pluginsdk.Instance, 
 	return result, nil
 }
 
+func (c *Client) AssessOnboardingContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.OnboardingAssessment, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.OnboardingAssessment{}, err
+	}
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.AssessOnboarding", payload, &reply); err != nil {
+		return pluginsdk.OnboardingAssessment{}, err
+	}
+	var result pluginsdk.OnboardingAssessment
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.OnboardingAssessment{}, err
+	}
+	if err := result.Validate(); err != nil {
+		return pluginsdk.OnboardingAssessment{}, err
+	}
+	return result, nil
+}
+
 func (c *Client) CookieSourceTestContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) error {
 	payload, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {

@@ -947,6 +947,26 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 			return &actionHandler{external: e, inst: inst, secrets: secrets}, nil
 		}
 	}
+	if out.HasExactCapability(pluginsdk.CapabilityOnboardingAssessment) {
+		out.AssessOnboarding = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.OnboardingAssessment, error) {
+			var result pluginsdk.OnboardingAssessment
+			callCtx, cancel := contextWithTimeout(ctx, externalPluginAuthTimeout)
+			defer cancel()
+			scopeType, scopeID := "plugin", "global"
+			if inst.ID != "" && inst.ID != "global" {
+				scopeType, scopeID = "connection", inst.ID
+			}
+			err := e.withClientForScopeOperation(callCtx, scopeType, scopeID, "plugin.onboarding.assess", func(c *Client) error {
+				got, err := c.AssessOnboardingContext(callCtx, inst, secrets)
+				if err != nil {
+					return err
+				}
+				result = got
+				return nil
+			})
+			return result, err
+		}
+	}
 	if out.HasExactCapability("lifecycle.install") {
 		// 默认组件（id 为空串）→ out.Install/CheckInstall/Uninstall；manifest 声明的其余
 		// 组件 → out.InstallComponents。转发时把组件 id 透传给插件进程，由其按 id 路由。
