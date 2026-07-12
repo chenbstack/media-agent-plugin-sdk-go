@@ -281,7 +281,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 		ConfigJSON: configJSON,
 	}
 	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil || inst.SiteAccounts != nil ||
-		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil {
+		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil || inst.Configuration != nil {
 		id := c.broker.NextId()
 		payload.HostServicesBrokerID = id
 		go c.broker.AcceptAndServe(id, &hostServicesServer{
@@ -301,6 +301,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			downloads:         inst.Downloads,
 			transfers:         inst.Transfers,
 			rules:             inst.Rules,
+			configuration:     inst.Configuration,
 		})
 	}
 	return payload, nil

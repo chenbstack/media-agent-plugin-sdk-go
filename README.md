@@ -40,6 +40,14 @@ whether the plugin still needs a first-run configuration form. Plugins decide
 semantic readiness; the signed Official Release manifest owns grouping and
 ordering.
 
+## Configuration migration
+
+Migration plugins that are granted `host.configuration.write` can use
+`Instance.Configuration` to upsert schema-validated connections, storages and
+directory mappings, or to update global settings and schedules. Secret values
+are carried separately from ordinary config so the host can move them into its
+encrypted secret store before persisting a connection.
+
 ## License
 
 This repository does not currently include a software license. No permission

@@ -30,6 +30,7 @@ type hostServicesServer struct {
 	downloads         pluginsdk.Downloads
 	transfers         pluginsdk.Transfers
 	rules             pluginsdk.Rules
+	configuration     pluginsdk.Configuration
 }
 
 type RevealRequest struct {
@@ -208,6 +209,63 @@ type RuleSortSetRequest struct {
 
 type RuleDefaultSetRequest struct {
 	Input pluginsdk.RuleDefaultWrite
+}
+
+type ConnectionUpsertRequest struct{ Input pluginsdk.ConnectionWrite }
+type StorageUpsertRequest struct{ Input pluginsdk.StorageWrite }
+type DirectoryMappingUpsertRequest struct {
+	Input pluginsdk.DirectoryMappingWrite
+}
+type SettingSetRequest struct{ Input pluginsdk.SettingWrite }
+type ScheduleSetRequest struct{ Input pluginsdk.ScheduleWrite }
+
+func (s *hostServicesServer) configurationResult(permission string, run func() (pluginsdk.HostWriteResult, error), reply *JSONReply) error {
+	if s.configuration == nil {
+		return fmt.Errorf("宿主未提供 Configuration")
+	}
+	if err := s.requireHostPermission(permission); err != nil {
+		return err
+	}
+	result, err := run()
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) UpsertConnection(req ConnectionUpsertRequest, reply *JSONReply) error {
+	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.configuration.UpsertConnection(s.ctx, req.Input)
+	}, reply)
+}
+
+func (s *hostServicesServer) UpsertStorage(req StorageUpsertRequest, reply *JSONReply) error {
+	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.configuration.UpsertStorage(s.ctx, req.Input)
+	}, reply)
+}
+
+func (s *hostServicesServer) UpsertDirectoryMapping(req DirectoryMappingUpsertRequest, reply *JSONReply) error {
+	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.configuration.UpsertDirectoryMapping(s.ctx, req.Input)
+	}, reply)
+}
+
+func (s *hostServicesServer) SetSetting(req SettingSetRequest, reply *JSONReply) error {
+	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.configuration.SetSetting(s.ctx, req.Input)
+	}, reply)
+}
+
+func (s *hostServicesServer) SetSchedule(req ScheduleSetRequest, reply *JSONReply) error {
+	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.configuration.SetSchedule(s.ctx, req.Input)
+	}, reply)
 }
 
 func (s *hostServicesServer) UpsertSiteAccount(req SiteAccountUpsertRequest, reply *JSONReply) error {
@@ -660,6 +718,34 @@ func (c *hostServicesClient) SetRuleDefault(ctx context.Context, input pluginsdk
 		return pluginsdk.RuleDefaultResult{}, err
 	}
 	return result, nil
+}
+
+func (c *hostServicesClient) configurationCall(method string, input any) (pluginsdk.HostWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call(method, input, &reply); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	var result pluginsdk.HostWriteResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.HostWriteResult{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) UpsertConnection(_ context.Context, input pluginsdk.ConnectionWrite) (pluginsdk.HostWriteResult, error) {
+	return c.configurationCall("Plugin.UpsertConnection", ConnectionUpsertRequest{Input: input})
+}
+func (c *hostServicesClient) UpsertStorage(_ context.Context, input pluginsdk.StorageWrite) (pluginsdk.HostWriteResult, error) {
+	return c.configurationCall("Plugin.UpsertStorage", StorageUpsertRequest{Input: input})
+}
+func (c *hostServicesClient) UpsertDirectoryMapping(_ context.Context, input pluginsdk.DirectoryMappingWrite) (pluginsdk.HostWriteResult, error) {
+	return c.configurationCall("Plugin.UpsertDirectoryMapping", DirectoryMappingUpsertRequest{Input: input})
+}
+func (c *hostServicesClient) SetSetting(_ context.Context, input pluginsdk.SettingWrite) (pluginsdk.HostWriteResult, error) {
+	return c.configurationCall("Plugin.SetSetting", SettingSetRequest{Input: input})
+}
+func (c *hostServicesClient) SetSchedule(_ context.Context, input pluginsdk.ScheduleWrite) (pluginsdk.HostWriteResult, error) {
+	return c.configurationCall("Plugin.SetSchedule", ScheduleSetRequest{Input: input})
 }
 
 func (c *hostServicesClient) Log(ctx context.Context, level pluginsdk.LogLevel, message string, attrs ...any) {

@@ -50,19 +50,28 @@ type EpisodeSelection struct {
 }
 
 type SubscriptionWrite struct {
-	TargetID        string             `json:"target_id,omitempty"`
-	IdempotencyKey  string             `json:"idempotency_key"`
-	Media           MediaIdentity      `json:"media"`
-	Season          int                `json:"season,omitempty"`
-	TotalEpisodes   int                `json:"total_episodes,omitempty"`
-	WantedEpisodes  []EpisodeSelection `json:"wanted_episodes,omitempty"`
-	Status          string             `json:"status,omitempty"`
-	RuleProfileID   string             `json:"rule_profile_id,omitempty"`
-	RuleProfileName string             `json:"rule_profile_name,omitempty"`
-	RuleProfileKey  string             `json:"rule_profile_key,omitempty"`
-	SourceName      string             `json:"source_name,omitempty"`
-	CreatedAt       string             `json:"created_at,omitempty"`
-	Metadata        json.RawMessage    `json:"metadata,omitempty"`
+	TargetID                string             `json:"target_id,omitempty"`
+	IdempotencyKey          string             `json:"idempotency_key"`
+	Media                   MediaIdentity      `json:"media"`
+	Season                  int                `json:"season,omitempty"`
+	TotalEpisodes           int                `json:"total_episodes,omitempty"`
+	WantedEpisodes          []EpisodeSelection `json:"wanted_episodes,omitempty"`
+	Status                  string             `json:"status,omitempty"`
+	RuleProfileID           string             `json:"rule_profile_id,omitempty"`
+	RuleProfileName         string             `json:"rule_profile_name,omitempty"`
+	RuleProfileKey          string             `json:"rule_profile_key,omitempty"`
+	Mode                    string             `json:"mode,omitempty"`
+	UpgradeStrategy         string             `json:"upgrade_strategy,omitempty"`
+	UpgradeThreshold        string             `json:"upgrade_threshold,omitempty"`
+	SubscriptionSites       []string           `json:"subscription_sites,omitempty"`
+	ReleaseGroups           []string           `json:"release_groups,omitempty"`
+	AutoSubscribeNewSeasons bool               `json:"auto_subscribe_new_seasons,omitempty"`
+	DownloaderName          string             `json:"downloader_name,omitempty"`
+	MediaServerName         string             `json:"media_server_name,omitempty"`
+	SavePath                string             `json:"save_path,omitempty"`
+	SourceName              string             `json:"source_name,omitempty"`
+	CreatedAt               string             `json:"created_at,omitempty"`
+	Metadata                json.RawMessage    `json:"metadata,omitempty"`
 }
 
 // Subscriptions exposes idempotent subscription writes to plugins.

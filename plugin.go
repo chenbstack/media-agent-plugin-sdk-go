@@ -313,6 +313,7 @@ type Instance struct {
 	Downloads     Downloads
 	Transfers     Transfers
 	Rules         Rules
+	Configuration Configuration
 	Runtime       *runtimesdk.Services
 }
 

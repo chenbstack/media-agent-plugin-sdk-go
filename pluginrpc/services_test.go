@@ -74,12 +74,16 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 		downloads:     memoryDownloads{},
 		transfers:     memoryTransfers{},
 		rules:         memoryRules{},
+		configuration: memoryConfiguration{},
 	}
 	var writeReply JSONReply
 	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &writeReply); err == nil {
 		t.Fatal("expected subscription write without host permission to fail")
 	}
-	server.permissions.Host = []string{"subscriptions.write", "downloads.read", "downloads.write", "transfers.write", "rules.read", "rules.write"}
+	if err := server.SetSetting(SettingSetRequest{}, &writeReply); err == nil {
+		t.Fatal("expected configuration write without host permission to fail")
+	}
+	server.permissions.Host = []string{"subscriptions.write", "downloads.read", "downloads.write", "transfers.write", "rules.read", "rules.write", "configuration.write"}
 	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &writeReply); err != nil {
 		t.Fatalf("UpsertSubscription with permission: %v", err)
 	}
@@ -107,6 +111,9 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 	}
 	if err := server.SetRuleDefault(RuleDefaultSetRequest{}, &writeReply); err != nil {
 		t.Fatalf("SetRuleDefault with permission: %v", err)
+	}
+	if err := server.SetSetting(SettingSetRequest{}, &writeReply); err != nil {
+		t.Fatalf("SetSetting with permission: %v", err)
 	}
 }
 
@@ -222,4 +229,22 @@ func (memoryRules) SetRuleSort(context.Context, pluginsdk.RuleSortWrite) (plugin
 
 func (memoryRules) SetRuleDefault(context.Context, pluginsdk.RuleDefaultWrite) (pluginsdk.RuleDefaultResult, error) {
 	return pluginsdk.RuleDefaultResult{}, nil
+}
+
+type memoryConfiguration struct{}
+
+func (memoryConfiguration) UpsertConnection(context.Context, pluginsdk.ConnectionWrite) (pluginsdk.HostWriteResult, error) {
+	return pluginsdk.HostWriteResult{TargetID: "connection-1", Change: "created"}, nil
+}
+func (memoryConfiguration) UpsertStorage(context.Context, pluginsdk.StorageWrite) (pluginsdk.HostWriteResult, error) {
+	return pluginsdk.HostWriteResult{TargetID: "storage-1", Change: "created"}, nil
+}
+func (memoryConfiguration) UpsertDirectoryMapping(context.Context, pluginsdk.DirectoryMappingWrite) (pluginsdk.HostWriteResult, error) {
+	return pluginsdk.HostWriteResult{TargetID: "directory-1", Change: "created"}, nil
+}
+func (memoryConfiguration) SetSetting(context.Context, pluginsdk.SettingWrite) (pluginsdk.HostWriteResult, error) {
+	return pluginsdk.HostWriteResult{TargetID: "setting-1", Change: "updated"}, nil
+}
+func (memoryConfiguration) SetSchedule(context.Context, pluginsdk.ScheduleWrite) (pluginsdk.HostWriteResult, error) {
+	return pluginsdk.HostWriteResult{TargetID: "schedule-1", Change: "updated"}, nil
 }
