@@ -40,6 +40,14 @@ whether the plugin still needs a first-run configuration form. Plugins decide
 semantic readiness; the signed Official Release manifest owns grouping and
 ordering.
 
+A plugin may also declare an `onboarding` workflow in its manifest. After the
+host validates and saves the plugin's onboarding configuration, it invokes the
+declared `submit_action`. `submit_label` and optional `pending_label` remain
+plugin-owned UI copy. When `status_action` is present, the host polls that
+action and renders its standard action-progress payload in the onboarding
+page. This keeps business behavior and progress state inside the plugin while
+the host provides only generic orchestration and presentation.
+
 ## Domain migration capabilities
 
 Migration plugins use the same domain-oriented pattern as `Rules`:

@@ -29,6 +29,7 @@ const (
 	CategoryAutomation   = "automation"
 	CategoryOther        = "other"
 
+	CapabilityOnboardingConnection = "onboarding.connection"
 	CapabilityOnboardingAssessment = "onboarding.assess"
 )
 
@@ -50,11 +51,23 @@ type Manifest struct {
 	API           *APIExtension       `yaml:"api,omitempty" json:"api,omitempty"`
 	UI            *UIExtension        `yaml:"ui,omitempty" json:"ui,omitempty"`
 	Identity      *IdentityExtension  `yaml:"identity,omitempty" json:"identity,omitempty"`
+	Onboarding    *OnboardingWorkflow `yaml:"onboarding,omitempty" json:"onboarding,omitempty"`
 	Entitlements  []string            `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
 	Actions       []ActionDefinition  `yaml:"actions,omitempty" json:"actions,omitempty"`
 	Permissions   Permissions         `yaml:"permissions" json:"permissions"`
 	Resources     Resources           `yaml:"resources" json:"resources"`
 	Install       *InstallInfo        `yaml:"install,omitempty" json:"install,omitempty"`
+}
+
+// OnboardingWorkflow lets a plugin own the operation performed after the host
+// validates and saves its onboarding configuration. The host invokes
+// SubmitAction immediately and, when StatusAction is present, polls it and
+// renders the standard action-progress payload while the submit action runs.
+type OnboardingWorkflow struct {
+	SubmitAction string `yaml:"submit_action" json:"submit_action"`
+	SubmitLabel  string `yaml:"submit_label" json:"submit_label"`
+	PendingLabel string `yaml:"pending_label,omitempty" json:"pending_label,omitempty"`
+	StatusAction string `yaml:"status_action,omitempty" json:"status_action,omitempty"`
 }
 
 // APIExtension 声明由宿主代理的插件业务 API。Service 会成为
@@ -529,6 +542,31 @@ func (p Plugin) Validate() error {
 		if action.Permissions != nil {
 			if err := validatePermissionSubset(m.Permissions, *action.Permissions); err != nil {
 				return fmt.Errorf("插件 %s action %s 权限声明无效: %w", m.ID, action.ID, err)
+			}
+		}
+	}
+	if m.Onboarding != nil {
+		if _, ok := capabilities[CapabilityOnboardingConnection]; !ok {
+			return fmt.Errorf("插件 %s: 声明 onboarding 时必须包含 capability %s", m.ID, CapabilityOnboardingConnection)
+		}
+		if _, ok := capabilities["action.run"]; !ok {
+			return fmt.Errorf("插件 %s: 声明 onboarding 时必须包含 capability action.run", m.ID)
+		}
+		if !seenActions[m.Onboarding.SubmitAction] {
+			return fmt.Errorf("插件 %s: onboarding.submit_action %q 未声明为 action", m.ID, m.Onboarding.SubmitAction)
+		}
+		if strings.TrimSpace(m.Onboarding.SubmitLabel) == "" {
+			return fmt.Errorf("插件 %s: onboarding.submit_label 不能为空", m.ID)
+		}
+		if m.Onboarding.StatusAction != "" {
+			if !seenActions[m.Onboarding.StatusAction] {
+				return fmt.Errorf("插件 %s: onboarding.status_action %q 未声明为 action", m.ID, m.Onboarding.StatusAction)
+			}
+			if m.Onboarding.StatusAction == m.Onboarding.SubmitAction {
+				return fmt.Errorf("插件 %s: onboarding.status_action 不能与 submit_action 相同", m.ID)
+			}
+			if _, ok := capabilities["action.status"]; !ok {
+				return fmt.Errorf("插件 %s: 声明 onboarding.status_action 时必须包含 capability action.status", m.ID)
 			}
 		}
 	}
