@@ -40,13 +40,14 @@ whether the plugin still needs a first-run configuration form. Plugins decide
 semantic readiness; the signed Official Release manifest owns grouping and
 ordering.
 
-## Configuration migration
+## Domain migration capabilities
 
-Migration plugins that are granted `host.configuration.write` can use
-`Instance.Configuration` to upsert schema-validated connections, storages and
-directory mappings, or to update global settings and schedules. Secret values
-are carried separately from ordinary config so the host can move them into its
-encrypted secret store before persisting a connection.
+Migration plugins use the same domain-oriented pattern as `Rules`:
+`Instance.Connections`, `Instance.Storages`, `Instance.Schedules`, and the
+existing `Instance.Settings` each expose both reads and permission-scoped
+writes. `Storages` also owns directory mappings. Secret values are carried
+separately from ordinary config so the host can move them into encrypted secret
+storage before persisting a connection or storage.
 
 ## License
 

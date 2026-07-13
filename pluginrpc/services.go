@@ -30,7 +30,10 @@ type hostServicesServer struct {
 	downloads         pluginsdk.Downloads
 	transfers         pluginsdk.Transfers
 	rules             pluginsdk.Rules
-	configuration     pluginsdk.Configuration
+	connections       pluginsdk.Connections
+	storages          pluginsdk.Storages
+	schedules         pluginsdk.Schedules
+	settings          pluginsdk.Settings
 }
 
 type RevealRequest struct {
@@ -211,18 +214,25 @@ type RuleDefaultSetRequest struct {
 	Input pluginsdk.RuleDefaultWrite
 }
 
+type ConnectionListRequest struct{ Section string }
+type ConnectionGetRequest struct{ Section, ID string }
 type ConnectionUpsertRequest struct{ Input pluginsdk.ConnectionWrite }
+type StorageGetRequest struct{ ID string }
 type StorageUpsertRequest struct{ Input pluginsdk.StorageWrite }
+type DirectoryMappingGetRequest struct{ ID string }
 type DirectoryMappingUpsertRequest struct {
 	Input pluginsdk.DirectoryMappingWrite
 }
+type SettingGetRequest struct{ Key string }
+type SettingGetReply struct {
+	Found bool
+	Value []byte
+}
 type SettingSetRequest struct{ Input pluginsdk.SettingWrite }
+type ScheduleGetRequest struct{ TaskType string }
 type ScheduleSetRequest struct{ Input pluginsdk.ScheduleWrite }
 
-func (s *hostServicesServer) configurationResult(permission string, run func() (pluginsdk.HostWriteResult, error), reply *JSONReply) error {
-	if s.configuration == nil {
-		return fmt.Errorf("宿主未提供 Configuration")
-	}
+func (s *hostServicesServer) hostWriteResult(permission string, run func() (pluginsdk.HostWriteResult, error), reply *JSONReply) error {
 	if err := s.requireHostPermission(permission); err != nil {
 		return err
 	}
@@ -238,33 +248,208 @@ func (s *hostServicesServer) configurationResult(permission string, run func() (
 	return nil
 }
 
+func (s *hostServicesServer) ListConnections(req ConnectionListRequest, reply *JSONReply) error {
+	if s.connections == nil {
+		return fmt.Errorf("宿主未提供 Connections")
+	}
+	if err := s.requireHostPermission("connections.read"); err != nil {
+		return err
+	}
+	result, err := s.connections.ListConnections(s.ctx, req.Section)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) GetConnection(req ConnectionGetRequest, reply *JSONReply) error {
+	if s.connections == nil {
+		return fmt.Errorf("宿主未提供 Connections")
+	}
+	if err := s.requireHostPermission("connections.read"); err != nil {
+		return err
+	}
+	result, err := s.connections.GetConnection(s.ctx, req.Section, req.ID)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
 func (s *hostServicesServer) UpsertConnection(req ConnectionUpsertRequest, reply *JSONReply) error {
-	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
-		return s.configuration.UpsertConnection(s.ctx, req.Input)
+	if s.connections == nil {
+		return fmt.Errorf("宿主未提供 Connections")
+	}
+	return s.hostWriteResult("connections.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.connections.UpsertConnection(s.ctx, req.Input)
 	}, reply)
+}
+
+func (s *hostServicesServer) ListStorages(_ Empty, reply *JSONReply) error {
+	if s.storages == nil {
+		return fmt.Errorf("宿主未提供 Storages")
+	}
+	if err := s.requireHostPermission("storages.read"); err != nil {
+		return err
+	}
+	result, err := s.storages.ListStorages(s.ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) GetStorage(req StorageGetRequest, reply *JSONReply) error {
+	if s.storages == nil {
+		return fmt.Errorf("宿主未提供 Storages")
+	}
+	if err := s.requireHostPermission("storages.read"); err != nil {
+		return err
+	}
+	result, err := s.storages.GetStorage(s.ctx, req.ID)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
 }
 
 func (s *hostServicesServer) UpsertStorage(req StorageUpsertRequest, reply *JSONReply) error {
-	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
-		return s.configuration.UpsertStorage(s.ctx, req.Input)
+	if s.storages == nil {
+		return fmt.Errorf("宿主未提供 Storages")
+	}
+	return s.hostWriteResult("storages.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.storages.UpsertStorage(s.ctx, req.Input)
 	}, reply)
+}
+
+func (s *hostServicesServer) ListDirectoryMappings(_ Empty, reply *JSONReply) error {
+	if s.storages == nil {
+		return fmt.Errorf("宿主未提供 Storages")
+	}
+	if err := s.requireHostPermission("storages.read"); err != nil {
+		return err
+	}
+	result, err := s.storages.ListDirectoryMappings(s.ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) GetDirectoryMapping(req DirectoryMappingGetRequest, reply *JSONReply) error {
+	if s.storages == nil {
+		return fmt.Errorf("宿主未提供 Storages")
+	}
+	if err := s.requireHostPermission("storages.read"); err != nil {
+		return err
+	}
+	result, err := s.storages.GetDirectoryMapping(s.ctx, req.ID)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
 }
 
 func (s *hostServicesServer) UpsertDirectoryMapping(req DirectoryMappingUpsertRequest, reply *JSONReply) error {
-	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
-		return s.configuration.UpsertDirectoryMapping(s.ctx, req.Input)
+	if s.storages == nil {
+		return fmt.Errorf("宿主未提供 Storages")
+	}
+	return s.hostWriteResult("storages.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.storages.UpsertDirectoryMapping(s.ctx, req.Input)
 	}, reply)
+}
+
+func (s *hostServicesServer) GetSetting(req SettingGetRequest, reply *SettingGetReply) error {
+	if s.settings == nil {
+		return fmt.Errorf("宿主未提供 Settings")
+	}
+	if err := s.requireHostPermission("settings.read"); err != nil {
+		return err
+	}
+	var raw json.RawMessage
+	found, err := s.settings.JSON(s.ctx, req.Key, &raw)
+	if err != nil {
+		return err
+	}
+	reply.Found, reply.Value = found, append([]byte(nil), raw...)
+	return nil
 }
 
 func (s *hostServicesServer) SetSetting(req SettingSetRequest, reply *JSONReply) error {
-	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
-		return s.configuration.SetSetting(s.ctx, req.Input)
+	if s.settings == nil {
+		return fmt.Errorf("宿主未提供 Settings")
+	}
+	return s.hostWriteResult("settings.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.settings.SetSetting(s.ctx, req.Input)
 	}, reply)
 }
 
+func (s *hostServicesServer) ListSchedules(_ Empty, reply *JSONReply) error {
+	if s.schedules == nil {
+		return fmt.Errorf("宿主未提供 Schedules")
+	}
+	if err := s.requireHostPermission("schedules.read"); err != nil {
+		return err
+	}
+	result, err := s.schedules.ListSchedules(s.ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) GetSchedule(req ScheduleGetRequest, reply *JSONReply) error {
+	if s.schedules == nil {
+		return fmt.Errorf("宿主未提供 Schedules")
+	}
+	if err := s.requireHostPermission("schedules.read"); err != nil {
+		return err
+	}
+	result, err := s.schedules.GetSchedule(s.ctx, req.TaskType)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
 func (s *hostServicesServer) SetSchedule(req ScheduleSetRequest, reply *JSONReply) error {
-	return s.configurationResult("configuration.write", func() (pluginsdk.HostWriteResult, error) {
-		return s.configuration.SetSchedule(s.ctx, req.Input)
+	if s.schedules == nil {
+		return fmt.Errorf("宿主未提供 Schedules")
+	}
+	return s.hostWriteResult("schedules.write", func() (pluginsdk.HostWriteResult, error) {
+		return s.schedules.SetSchedule(s.ctx, req.Input)
 	}, reply)
 }
 
@@ -720,7 +905,7 @@ func (c *hostServicesClient) SetRuleDefault(ctx context.Context, input pluginsdk
 	return result, nil
 }
 
-func (c *hostServicesClient) configurationCall(method string, input any) (pluginsdk.HostWriteResult, error) {
+func (c *hostServicesClient) hostWriteCall(method string, input any) (pluginsdk.HostWriteResult, error) {
 	var reply JSONReply
 	if err := c.client.Call(method, input, &reply); err != nil {
 		return pluginsdk.HostWriteResult{}, err
@@ -732,20 +917,131 @@ func (c *hostServicesClient) configurationCall(method string, input any) (plugin
 	return result, nil
 }
 
+func (c *hostServicesClient) ListConnections(_ context.Context, section string) ([]pluginsdk.Connection, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.ListConnections", ConnectionListRequest{Section: section}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.Connection
+	return result, decodeJSON(reply.Data, &result)
+}
+func (c *hostServicesClient) GetConnection(_ context.Context, section, id string) (pluginsdk.Connection, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.GetConnection", ConnectionGetRequest{Section: section, ID: id}, &reply); err != nil {
+		return pluginsdk.Connection{}, err
+	}
+	var result pluginsdk.Connection
+	return result, decodeJSON(reply.Data, &result)
+}
 func (c *hostServicesClient) UpsertConnection(_ context.Context, input pluginsdk.ConnectionWrite) (pluginsdk.HostWriteResult, error) {
-	return c.configurationCall("Plugin.UpsertConnection", ConnectionUpsertRequest{Input: input})
+	return c.hostWriteCall("Plugin.UpsertConnection", ConnectionUpsertRequest{Input: input})
+}
+func (c *hostServicesClient) ListStorages(_ context.Context) ([]pluginsdk.Storage, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.ListStorages", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.Storage
+	return result, decodeJSON(reply.Data, &result)
+}
+func (c *hostServicesClient) GetStorage(_ context.Context, id string) (pluginsdk.Storage, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.GetStorage", StorageGetRequest{ID: id}, &reply); err != nil {
+		return pluginsdk.Storage{}, err
+	}
+	var result pluginsdk.Storage
+	return result, decodeJSON(reply.Data, &result)
 }
 func (c *hostServicesClient) UpsertStorage(_ context.Context, input pluginsdk.StorageWrite) (pluginsdk.HostWriteResult, error) {
-	return c.configurationCall("Plugin.UpsertStorage", StorageUpsertRequest{Input: input})
+	return c.hostWriteCall("Plugin.UpsertStorage", StorageUpsertRequest{Input: input})
+}
+func (c *hostServicesClient) ListDirectoryMappings(_ context.Context) ([]pluginsdk.DirectoryMapping, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.ListDirectoryMappings", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.DirectoryMapping
+	return result, decodeJSON(reply.Data, &result)
+}
+func (c *hostServicesClient) GetDirectoryMapping(_ context.Context, id string) (pluginsdk.DirectoryMapping, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.GetDirectoryMapping", DirectoryMappingGetRequest{ID: id}, &reply); err != nil {
+		return pluginsdk.DirectoryMapping{}, err
+	}
+	var result pluginsdk.DirectoryMapping
+	return result, decodeJSON(reply.Data, &result)
 }
 func (c *hostServicesClient) UpsertDirectoryMapping(_ context.Context, input pluginsdk.DirectoryMappingWrite) (pluginsdk.HostWriteResult, error) {
-	return c.configurationCall("Plugin.UpsertDirectoryMapping", DirectoryMappingUpsertRequest{Input: input})
+	return c.hostWriteCall("Plugin.UpsertDirectoryMapping", DirectoryMappingUpsertRequest{Input: input})
+}
+func (c *hostServicesClient) setting(key string) ([]byte, bool, error) {
+	var reply SettingGetReply
+	if err := c.client.Call("Plugin.GetSetting", SettingGetRequest{Key: key}, &reply); err != nil {
+		return nil, false, err
+	}
+	return reply.Value, reply.Found, nil
+}
+func (c *hostServicesClient) String(_ context.Context, key string) (string, bool) {
+	raw, found, err := c.setting(key)
+	if err != nil || !found {
+		return "", false
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		return "", false
+	}
+	return value, true
+}
+func (c *hostServicesClient) Int(_ context.Context, key string) (int64, bool) {
+	raw, found, err := c.setting(key)
+	if err != nil || !found {
+		return 0, false
+	}
+	var value int64
+	if json.Unmarshal(raw, &value) != nil {
+		return 0, false
+	}
+	return value, true
+}
+func (c *hostServicesClient) Bool(_ context.Context, key string) (bool, bool) {
+	raw, found, err := c.setting(key)
+	if err != nil || !found {
+		return false, false
+	}
+	var value bool
+	if json.Unmarshal(raw, &value) != nil {
+		return false, false
+	}
+	return value, true
+}
+func (c *hostServicesClient) JSON(_ context.Context, key string, out any) (bool, error) {
+	raw, found, err := c.setting(key)
+	if err != nil || !found {
+		return false, err
+	}
+	return true, json.Unmarshal(raw, out)
 }
 func (c *hostServicesClient) SetSetting(_ context.Context, input pluginsdk.SettingWrite) (pluginsdk.HostWriteResult, error) {
-	return c.configurationCall("Plugin.SetSetting", SettingSetRequest{Input: input})
+	return c.hostWriteCall("Plugin.SetSetting", SettingSetRequest{Input: input})
+}
+func (c *hostServicesClient) ListSchedules(_ context.Context) ([]pluginsdk.Schedule, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.ListSchedules", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.Schedule
+	return result, decodeJSON(reply.Data, &result)
+}
+func (c *hostServicesClient) GetSchedule(_ context.Context, taskType string) (pluginsdk.Schedule, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.GetSchedule", ScheduleGetRequest{TaskType: taskType}, &reply); err != nil {
+		return pluginsdk.Schedule{}, err
+	}
+	var result pluginsdk.Schedule
+	return result, decodeJSON(reply.Data, &result)
 }
 func (c *hostServicesClient) SetSchedule(_ context.Context, input pluginsdk.ScheduleWrite) (pluginsdk.HostWriteResult, error) {
-	return c.configurationCall("Plugin.SetSchedule", ScheduleSetRequest{Input: input})
+	return c.hostWriteCall("Plugin.SetSchedule", ScheduleSetRequest{Input: input})
 }
 
 func (c *hostServicesClient) Log(ctx context.Context, level pluginsdk.LogLevel, message string, attrs ...any) {

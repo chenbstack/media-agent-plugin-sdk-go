@@ -543,7 +543,10 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		inst.Downloads = services
 		inst.Transfers = services
 		inst.Rules = services
-		inst.Configuration = services
+		inst.Connections = services
+		inst.Storages = services
+		inst.Schedules = services
+		inst.Settings = services
 	}
 	closeFn := func() {}
 	if services != nil {
