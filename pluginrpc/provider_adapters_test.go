@@ -2,6 +2,7 @@ package pluginrpc
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/rpc"
 	"reflect"
@@ -11,6 +12,21 @@ import (
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 	providerfake "github.com/chenbstack/media-agent-plugin-sdk-go/providers/fake"
 )
+
+type failingProviderSession struct{ err error }
+
+func (s failingProviderSession) pluginID() string { return "legacy" }
+func (s failingProviderSession) withClient(context.Context, string, func(*Client) error) error {
+	return s.err
+}
+
+func TestIncrementalAdapterTreatsLegacyRPCAsUnsupported(t *testing.T) {
+	p := &mediaServerProvider{session: failingProviderSession{err: errors.New("rpc: can't find method Plugin.MediaServerItemsChangedSince")}}
+	_, _, err := p.ItemsChangedSince(context.Background(), "lib", "2026-07-15T00:00:00Z", 0, 10)
+	if !errors.Is(err, providers.ErrIncrementalSyncUnsupported) {
+		t.Fatalf("legacy RPC error = %v", err)
+	}
+}
 
 func TestProviderAdaptersUseDispensedClientForAllCoreProviders(t *testing.T) {
 	downloader := providerfake.NewDownloader()
@@ -82,6 +98,13 @@ func TestProviderAdaptersUseDispensedClientForAllCoreProviders(t *testing.T) {
 	}
 	if got, total, err := m.Items(context.Background(), "lib", 0, 10); err != nil || total != 1 || len(got) != 1 {
 		t.Fatalf("media Items = %#v, %d, %v", got, total, err)
+	}
+	incremental, ok := m.(providers.MediaServerIncrementalProvider)
+	if !ok {
+		t.Fatal("media incremental adapter missing")
+	}
+	if got, total, err := incremental.ItemsChangedSince(context.Background(), "lib", "2026-07-15T00:00:00Z", 0, 10); err != nil || total != 1 || len(got) != 1 {
+		t.Fatalf("media ItemsChangedSince = %#v, %d, %v", got, total, err)
 	}
 	if got, err := m.Search(context.Background(), "Arrival"); err != nil || len(got) != 1 {
 		t.Fatalf("media Search = %#v, %v", got, err)

@@ -243,6 +243,7 @@ type mediaServerProvider struct {
 }
 
 var _ providers.MediaServerProvider = (*mediaServerProvider)(nil)
+var _ providers.MediaServerIncrementalProvider = (*mediaServerProvider)(nil)
 
 func (p *mediaServerProvider) Kind() string { return p.session.pluginID() }
 func (p *mediaServerProvider) TestConnection(ctx context.Context) error {
@@ -259,6 +260,27 @@ func (p *mediaServerProvider) Items(ctx context.Context, libraryID string, start
 		return MediaServerItemsRequest{Instance: instance, LibraryID: libraryID, StartIndex: startIndex, Limit: limit}
 	}, &out)
 	return out.Items, out.Total, err
+}
+func (p *mediaServerProvider) ItemsChangedSince(ctx context.Context, libraryID, since string, startIndex, limit int) ([]providers.LibraryItem, int, error) {
+	var out MediaServerChangedItemsReply
+	err := p.json(ctx, "media_server.items_changed_since", "Plugin.MediaServerItemsChangedSince", func(instance InstancePayload) any {
+		return MediaServerChangedItemsRequest{
+			Instance: instance, LibraryID: libraryID, Since: since, StartIndex: startIndex, Limit: limit,
+		}
+	}, &out)
+	if err != nil {
+		// 升级后的宿主可能暂时连接仍运行旧 SDK 的 Pack。旧 RPC 服务没有该
+		// 方法时按“不支持增量”降级，避免小时任务把兼容性差异当作同步故障。
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "can't find method") || strings.Contains(message, "method not found") {
+			return nil, 0, providers.ErrIncrementalSyncUnsupported
+		}
+		return nil, 0, err
+	}
+	if !out.Supported {
+		return nil, 0, providers.ErrIncrementalSyncUnsupported
+	}
+	return out.Items, out.Total, nil
 }
 func (p *mediaServerProvider) Search(ctx context.Context, query string) ([]providers.LibraryItem, error) {
 	var out []providers.LibraryItem

@@ -246,6 +246,20 @@ type MediaServerItemsReply struct {
 	Total int
 }
 
+type MediaServerChangedItemsRequest struct {
+	Instance   InstancePayload
+	LibraryID  string
+	Since      string
+	StartIndex int
+	Limit      int
+}
+
+type MediaServerChangedItemsReply struct {
+	Supported bool
+	Items     []providers.LibraryItem
+	Total     int
+}
+
 type MediaServerSearchRequest struct {
 	Instance InstancePayload
 	Query    string

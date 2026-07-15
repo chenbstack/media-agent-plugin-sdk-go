@@ -179,6 +179,7 @@ type MediaServer struct {
 }
 
 var _ providers.MediaServerProvider = (*MediaServer)(nil)
+var _ providers.MediaServerIncrementalProvider = (*MediaServer)(nil)
 
 func NewMediaServer() *MediaServer {
 	return &MediaServer{}
@@ -231,6 +232,12 @@ func (m *MediaServer) Items(_ context.Context, libraryID string, startIndex, lim
 	}
 	end := min(startIndex+limit, total)
 	return append([]providers.LibraryItem(nil), inLib[startIndex:end]...), total, nil
+}
+
+// ItemsChangedSince 的 fake 不模拟远端时间，只复用分页数据；宿主测试可以用它
+// 验证增量 RPC 和 upsert 行为。
+func (m *MediaServer) ItemsChangedSince(ctx context.Context, libraryID, _ string, startIndex, limit int) ([]providers.LibraryItem, int, error) {
+	return m.Items(ctx, libraryID, startIndex, limit)
 }
 
 func (m *MediaServer) Search(_ context.Context, query string) ([]providers.LibraryItem, error) {

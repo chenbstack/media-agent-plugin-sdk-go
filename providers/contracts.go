@@ -211,6 +211,17 @@ type Existence struct {
 	PresentEpisodes map[int][]int // season -> 已存在的集
 }
 
+// ErrIncrementalSyncUnsupported 表示媒体服务器 Provider 没有可靠的按更新时间增量枚举能力。
+// 宿主收到后应跳过增量任务，并保留周期性全量校验。
+var ErrIncrementalSyncUnsupported = errors.New("media server incremental sync unsupported")
+
+// MediaServerIncrementalProvider 是 MediaServerProvider 的可选扩展。
+// since 必须是 RFC3339/RFC3339Nano 时间；返回值与 Items 一样按 startIndex/limit
+// 分页。该接口只负责新增和更新，删除仍由宿主的周期性全量校验发现。
+type MediaServerIncrementalProvider interface {
+	ItemsChangedSince(ctx context.Context, libraryID, since string, startIndex, limit int) ([]LibraryItem, int, error)
+}
+
 // MediaServerProvider 屏蔽 Emby、Jellyfin 等媒体库差异。
 type MediaServerProvider interface {
 	Kind() string

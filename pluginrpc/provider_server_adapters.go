@@ -130,6 +130,35 @@ func (s *rpcServer) MediaServerItems(req MediaServerItemsRequest, reply *JSONRep
 	return nil
 }
 
+func (s *rpcServer) MediaServerItemsChangedSince(req MediaServerChangedItemsRequest, reply *JSONReply) error {
+	p, closeFn, err := s.mediaServer(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	incremental, ok := p.(providers.MediaServerIncrementalProvider)
+	if !ok {
+		out, err := encodeJSON(MediaServerChangedItemsReply{Supported: false})
+		if err != nil {
+			return err
+		}
+		*reply = out
+		return nil
+	}
+	items, total, err := incremental.ItemsChangedSince(
+		context.Background(), req.LibraryID, req.Since, req.StartIndex, req.Limit,
+	)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(MediaServerChangedItemsReply{Supported: true, Items: items, Total: total})
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) MediaServerSearch(req MediaServerSearchRequest, reply *JSONReply) error {
 	p, closeFn, err := s.mediaServer(req.Instance)
 	if err != nil {
