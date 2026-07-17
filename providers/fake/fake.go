@@ -25,6 +25,7 @@ type Downloader struct {
 }
 
 var _ providers.DownloaderProvider = (*Downloader)(nil)
+var _ providers.DownloaderTagProvider = (*Downloader)(nil)
 
 func NewDownloader() *Downloader {
 	return &Downloader{
@@ -147,6 +148,27 @@ func (d *Downloader) SetFileSelection(_ context.Context, hash string, files []pr
 		}
 	}
 	d.files[hash] = next
+	return nil
+}
+
+func (d *Downloader) AddTags(_ context.Context, hash string, tags []string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	task, ok := d.tasks[hash]
+	if !ok {
+		return fmt.Errorf("fake downloader: 任务不存在 %s", hash)
+	}
+	seen := make(map[string]bool, len(task.Tags)+len(tags))
+	for _, tag := range task.Tags {
+		seen[tag] = true
+	}
+	for _, tag := range tags {
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		task.Tags = append(task.Tags, tag)
+	}
 	return nil
 }
 

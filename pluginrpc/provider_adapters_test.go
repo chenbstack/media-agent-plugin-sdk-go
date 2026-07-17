@@ -28,6 +28,14 @@ func TestIncrementalAdapterTreatsLegacyRPCAsUnsupported(t *testing.T) {
 	}
 }
 
+func TestDownloaderTagAdapterTreatsLegacyRPCAsUnsupported(t *testing.T) {
+	p := &downloaderProvider{session: failingProviderSession{err: errors.New("rpc: can't find method Plugin.DownloaderAddTags")}}
+	err := p.AddTags(context.Background(), "hash", []string{"organized"})
+	if !errors.Is(err, providers.ErrDownloaderTagsUnsupported) {
+		t.Fatalf("legacy RPC error = %v", err)
+	}
+}
+
 func TestProviderAdaptersUseDispensedClientForAllCoreProviders(t *testing.T) {
 	downloader := providerfake.NewDownloader()
 	downloader.SetTransferInfo(providers.TransferInfo{DownloadSpeed: 12, UploadSpeed: 3})
@@ -84,6 +92,17 @@ func TestProviderAdaptersUseDispensedClientForAllCoreProviders(t *testing.T) {
 	}
 	if got, err := d.TransferInfo(context.Background()); err != nil || got.DownloadSpeed != 12 {
 		t.Fatalf("downloader TransferInfo = %#v, %v", got, err)
+	}
+	tagger, ok := d.(providers.DownloaderTagProvider)
+	if !ok {
+		t.Fatal("downloader tag adapter missing")
+	}
+	if err := tagger.AddTags(context.Background(), task.Hash, []string{"organized"}); err != nil {
+		t.Fatalf("downloader AddTags: %v", err)
+	}
+	listed, err := d.List(context.Background())
+	if err != nil || len(listed) != 1 || len(listed[0].Tags) != 1 || listed[0].Tags[0] != "organized" {
+		t.Fatalf("downloader tags = %#v, %v", listed, err)
 	}
 	if err := d.Remove(context.Background(), task.Hash, true); err != nil {
 		t.Fatalf("downloader Remove: %v", err)

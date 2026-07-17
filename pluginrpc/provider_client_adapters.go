@@ -136,6 +136,7 @@ type downloaderProvider struct {
 }
 
 var _ providers.DownloaderProvider = (*downloaderProvider)(nil)
+var _ providers.DownloaderTagProvider = (*downloaderProvider)(nil)
 
 func (p *downloaderProvider) Kind() string { return p.session.pluginID() }
 
@@ -187,6 +188,21 @@ func (p *downloaderProvider) SetFileSelection(ctx context.Context, hash string, 
 		var reply Empty
 		return c.call(ctx, "Plugin.DownloaderSetFileSelection", DownloaderFileSelectionRequest{Instance: instance, Hash: hash, Files: files}, &reply)
 	})
+}
+
+func (p *downloaderProvider) AddTags(ctx context.Context, hash string, tags []string) error {
+	err := p.withPayload(ctx, "downloader.add_tags", func(c *Client, instance InstancePayload) error {
+		var reply Empty
+		return c.call(ctx, "Plugin.DownloaderAddTags", DownloaderTagsRequest{Instance: instance, Hash: hash, Tags: tags}, &reply)
+	})
+	if err != nil {
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "can't find method") || strings.Contains(message, "method not found") ||
+			strings.Contains(message, providers.ErrDownloaderTagsUnsupported.Error()) {
+			return providers.ErrDownloaderTagsUnsupported
+		}
+	}
+	return err
 }
 
 func (p *downloaderProvider) TransferInfo(ctx context.Context) (providers.TransferInfo, error) {

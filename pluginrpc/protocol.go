@@ -234,6 +234,12 @@ type DownloaderFileSelectionRequest struct {
 	Files    []providers.TorrentFile
 }
 
+type DownloaderTagsRequest struct {
+	Instance InstancePayload
+	Hash     string
+	Tags     []string
+}
+
 type MediaServerItemsRequest struct {
 	Instance   InstancePayload
 	LibraryID  string

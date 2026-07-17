@@ -164,6 +164,15 @@ type DownloaderProvider interface {
 	TransferInfo(ctx context.Context) (TransferInfo, error)
 }
 
+// DownloaderTagProvider is an optional downloader capability for appending
+// labels to an existing torrent. Hosts must feature-detect it so downloaders
+// that only implement DownloaderProvider remain compatible.
+type DownloaderTagProvider interface {
+	AddTags(ctx context.Context, hash string, tags []string) error
+}
+
+var ErrDownloaderTagsUnsupported = errors.New("downloader tags unsupported")
+
 // TransferInfo 是下载器全局传输状态快照。
 type TransferInfo struct {
 	DownloadSpeed int64 // bytes/s

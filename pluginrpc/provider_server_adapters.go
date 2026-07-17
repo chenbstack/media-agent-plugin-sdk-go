@@ -83,6 +83,19 @@ func (s *rpcServer) DownloaderSetFileSelection(req DownloaderFileSelectionReques
 	return p.SetFileSelection(context.Background(), req.Hash, req.Files)
 }
 
+func (s *rpcServer) DownloaderAddTags(req DownloaderTagsRequest, _ *Empty) error {
+	p, closeFn, err := s.downloader(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	tagger, ok := p.(providers.DownloaderTagProvider)
+	if !ok {
+		return fmt.Errorf("%w: %s", providers.ErrDownloaderTagsUnsupported, p.Kind())
+	}
+	return tagger.AddTags(context.Background(), req.Hash, req.Tags)
+}
+
 func (s *rpcServer) DownloaderTransferInfo(req InstancePayload, reply *JSONReply) error {
 	p, closeFn, err := s.downloader(req)
 	if err != nil {
