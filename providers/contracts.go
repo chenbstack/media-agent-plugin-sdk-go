@@ -110,7 +110,15 @@ const (
 )
 
 type AddTorrentRequest struct {
-	// TorrentURL 与 Magnet 二选一。
+	// TorrentData、TorrentURL、Magnet 三选一，TorrentData 优先。宿主在站点侧完成
+	// 种子下载与校验后直接携带文件内容，下载器插件应以文件形式提交，不应再访问
+	// TorrentURL；旧宿主只会设置 TorrentURL 或 Magnet，插件必须保留这两条路径。
+	TorrentData []byte
+	// TorrentName 是种子文件名提示（可空），仅用于以文件提交时的表单文件名。
+	TorrentName string
+	// InfoHash 是宿主从 TorrentData 解析出的 v1 info hash（十六进制小写，可空）。
+	// 提供时插件可在添加后直接按 hash 确认任务，省去回查等待窗口。
+	InfoHash   string
 	TorrentURL string
 	Magnet     string
 	SavePath   string
