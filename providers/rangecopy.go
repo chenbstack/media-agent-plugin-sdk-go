@@ -27,7 +27,13 @@ const (
 	defaultRangeCopyMinSegmentSize = int64(64 << 20)
 	defaultRangeCopyBufferSize     = 1 << 20
 	progressReportInterval         = 500 * time.Millisecond
+	// segmentCopyAttempts 是单段的总尝试次数（首次 + 2 次重试），
+	// 瞬时网络抖动不至于废掉整个文件已完成的部分。
+	segmentCopyAttempts = 3
 )
+
+// segmentRetryBaseDelay 是段重试的基础退避间隔（第 n 次重试等 n 倍），测试可缩短。
+var segmentRetryBaseDelay = 500 * time.Millisecond
 
 func (o RangeCopyOptions) withDefaults() RangeCopyOptions {
 	if o.MaxSegments <= 0 {
@@ -44,7 +50,8 @@ func (o RangeCopyOptions) withDefaults() RangeCopyOptions {
 
 // RangeCopy 把 source 的 sourcePath（共 size 字节）复制到 target 的 targetPath：
 // 先 Truncate 预置目标为最终大小，再分段并行流式写入各自偏移；小文件退化为单段。
-// 任一分段失败会取消其余分段并返回该错误，此时目标文件内容不完整。
+// 每段失败会自带退避重试（共 segmentCopyAttempts 次尝试），重试耗尽才取消
+// 其余分段并返回该错误，此时目标文件内容不完整。
 func RangeCopy(ctx context.Context, source RangeReadProvider, sourcePath string, size int64, target RangeWriteProvider, targetPath string, opts RangeCopyOptions) error {
 	if size < 0 {
 		return fmt.Errorf("分段复制大小无效: %d", size)
@@ -82,7 +89,7 @@ func RangeCopy(ctx context.Context, source RangeReadProvider, sourcePath string,
 		wg.Add(1)
 		go func(offset, length int64) {
 			defer wg.Done()
-			if err := copySegment(ctx, source, sourcePath, target, targetPath, offset, length, opts.BufferSize, &copied); err != nil {
+			if err := copySegmentWithRetry(ctx, source, sourcePath, target, targetPath, offset, length, opts.BufferSize, &copied); err != nil {
 				errCh <- err
 				cancel()
 			}
@@ -99,29 +106,53 @@ func RangeCopy(ctx context.Context, source RangeReadProvider, sourcePath string,
 	return nil
 }
 
-func copySegment(ctx context.Context, source RangeReadProvider, sourcePath string, target RangeWriteProvider, targetPath string, offset, length int64, bufferSize int, copied *atomic.Int64) error {
+// copySegmentWithRetry 重试整段：每次失败先把该次尝试已计入的进度回退掉，
+// 重写不会让进度重复计数。ctx 取消（整体失败或调用方放弃）时立即停止。
+func copySegmentWithRetry(ctx context.Context, source RangeReadProvider, sourcePath string, target RangeWriteProvider, targetPath string, offset, length int64, bufferSize int, copied *atomic.Int64) error {
+	var lastErr error
+	for attempt := 1; attempt <= segmentCopyAttempts; attempt++ {
+		written, err := copySegment(ctx, source, sourcePath, target, targetPath, offset, length, bufferSize, copied)
+		if err == nil {
+			return nil
+		}
+		copied.Add(-written)
+		lastErr = err
+		if ctx.Err() != nil || attempt == segmentCopyAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(time.Duration(attempt) * segmentRetryBaseDelay):
+		}
+	}
+	return lastErr
+}
+
+// copySegment 返回本次尝试计入 copied 的字节数，失败时调用方据此回退进度。
+func copySegment(ctx context.Context, source RangeReadProvider, sourcePath string, target RangeWriteProvider, targetPath string, offset, length int64, bufferSize int, copied *atomic.Int64) (int64, error) {
 	reader, err := source.OpenRangeReader(ctx, sourcePath, offset, length)
 	if err != nil {
-		return fmt.Errorf("打开源分段 [%d,%d): %w", offset, offset+length, err)
+		return 0, fmt.Errorf("打开源分段 [%d,%d): %w", offset, offset+length, err)
 	}
 	defer reader.Close()
 	writer, err := target.OpenRangeWriter(ctx, targetPath, offset)
 	if err != nil {
-		return fmt.Errorf("打开目标分段 %d: %w", offset, err)
+		return 0, fmt.Errorf("打开目标分段 %d: %w", offset, err)
 	}
 	// LimitReader 防御实现多给数据。
 	n, err := pipeCopy(ctx, writer, io.LimitReader(reader, length), bufferSize, copied)
 	if err != nil {
 		_ = writer.Close()
-		return fmt.Errorf("复制分段 [%d,%d): %w", offset, offset+length, err)
+		return n, fmt.Errorf("复制分段 [%d,%d): %w", offset, offset+length, err)
 	}
 	if err := writer.Close(); err != nil {
-		return fmt.Errorf("关闭目标分段 %d: %w", offset, err)
+		return n, fmt.Errorf("关闭目标分段 %d: %w", offset, err)
 	}
 	if n != length {
-		return fmt.Errorf("分段 [%d,%d) 只复制了 %d 字节", offset, offset+length, n)
+		return n, fmt.Errorf("分段 [%d,%d) 只复制了 %d 字节", offset, offset+length, n)
 	}
-	return nil
+	return n, nil
 }
 
 // StreamCopy 用 BufferSize 缓冲把 r 全量拷到 w，期间按 Progress 节流上报累计字节数。

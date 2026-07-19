@@ -9,7 +9,13 @@ import (
 	"math/rand"
 	"sync"
 	"testing"
+	"time"
 )
+
+func init() {
+	// 缩短段重试退避，让永久失败类测试不用等真实退避时间。
+	segmentRetryBaseDelay = time.Millisecond
+}
 
 // memRangeStore 是内存里的 RangeRead/RangeWrite 双端实现，用于验证分段并行复制。
 type memRangeStore struct {
@@ -19,6 +25,8 @@ type memRangeStore struct {
 	openReads  int
 	openWrites int
 	readErr    error
+	// failReads 大于 0 时，前 failReads 次 OpenRangeReader 返回瞬时错误。
+	failReads int
 }
 
 func newMemRangeStore() *memRangeStore {
@@ -43,6 +51,10 @@ func (s *memRangeStore) OpenRangeReader(_ context.Context, name string, offset, 
 	s.openReads++
 	if s.readErr != nil {
 		return nil, s.readErr
+	}
+	if s.failReads > 0 {
+		s.failReads--
+		return nil, fmt.Errorf("瞬时网络错误")
 	}
 	data, ok := s.files[name]
 	if !ok {
@@ -192,6 +204,36 @@ func TestStreamCopyReportsProgress(t *testing.T) {
 	defer mu.Unlock()
 	if lastProgress != int64(len(data)) {
 		t.Fatalf("最终进度 = %d, want %d", lastProgress, len(data))
+	}
+}
+
+func TestRangeCopyRetriesTransientSegmentError(t *testing.T) {
+	source := newMemRangeStore()
+	target := newMemRangeStore()
+	data := randomBytes(4 << 20)
+	source.put("src.bin", data)
+	source.failReads = 2
+
+	var lastProgress int64
+	var mu sync.Mutex
+	opts := RangeCopyOptions{MaxSegments: 4, MinSegmentSize: 1 << 20, BufferSize: 64 << 10, Progress: func(copied int64) {
+		mu.Lock()
+		lastProgress = copied
+		mu.Unlock()
+	}}
+	if err := RangeCopy(context.Background(), source, "src.bin", int64(len(data)), target, "dst.bin", opts); err != nil {
+		t.Fatalf("瞬时错误应被段重试吸收: %v", err)
+	}
+	if !bytes.Equal(target.get("dst.bin"), data) {
+		t.Fatalf("目标内容与源不一致")
+	}
+	if source.openReads != 6 {
+		t.Fatalf("openReads = %d, want 6(4 段 + 2 次重试)", source.openReads)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if lastProgress != int64(len(data)) {
+		t.Fatalf("重试后最终进度 = %d, want %d(重试不应重复计数)", lastProgress, len(data))
 	}
 }
 
