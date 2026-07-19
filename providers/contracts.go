@@ -77,6 +77,45 @@ type ServerSideCopyProvider interface {
 	Copy(ctx context.Context, oldname, newname string) error
 }
 
+// 复制加速能力常量：插件在 Info().Capabilities 里声明对应能力后，
+// 宿主才会走更快的复制路径（老插件不声明则自动回退流式复制）。
+const (
+	// CapabilityRangeRead 声明实现了 RangeReadProvider。
+	CapabilityRangeRead = "storage.operation.range_read"
+	// CapabilityRangeWrite 声明实现了 RangeWriteProvider。
+	CapabilityRangeWrite = "storage.operation.range_write"
+	// CapabilityCrossCopy 声明同插件的两个存储实例之间支持进程内跨实例复制。
+	CapabilityCrossCopy = "storage.operation.cross_copy"
+)
+
+// RangeReadProvider 是支持从任意偏移读取指定长度的可选能力。
+// 实现必须支持并发打开多个区间读取器：分段并行复制会同时读多段。
+type RangeReadProvider interface {
+	OpenRangeReader(ctx context.Context, name string, offset, length int64) (io.ReadCloser, error)
+}
+
+// RangeWriteProvider 是支持在任意偏移写入的可选能力。
+// 复制方先用 Truncate 把目标文件预置为最终大小，再对各分段并发调用
+// OpenRangeWriter 写入各自区间；实现必须支持并发写不同区间。
+type RangeWriteProvider interface {
+	Truncate(ctx context.Context, name string, size int64) error
+	OpenRangeWriter(ctx context.Context, name string, offset int64) (io.WriteCloser, error)
+}
+
+// ProgressFunc 接收累计已复制字节数。实现按节流频率调用（约每 500ms 一次），
+// 复制成功结束时以最终值再调用一次；回调必须可安全并发调用且不可阻塞太久。
+type ProgressFunc func(copiedBytes int64)
+
+// ErrCrossInstanceCopyUnsupported 表示目标存储无法与给定源存储做进程内
+// 跨实例复制（不是同一插件的实例等），调用方应回退到其他复制方式。
+var ErrCrossInstanceCopyUnsupported = errors.New("目标存储不支持与该源存储做跨实例复制")
+
+// CrossInstanceCopyProvider 是同一插件的两个存储实例之间进程内复制的可选能力，
+// 数据不经过宿主进程。source 必须来自同一插件，否则返回 ErrCrossInstanceCopyUnsupported。
+type CrossInstanceCopyProvider interface {
+	CopyBetweenInstances(ctx context.Context, source StorageProvider, sourcePath, targetPath string, progress ProgressFunc) error
+}
+
 // PlaybackURLInput 描述宿主播放网关请求某个存储文件的播放地址。
 // Provider 通常只需要 Path；Metadata 预留给 115 pickcode、123 s3 key 等原生文件标识。
 type PlaybackURLInput struct {

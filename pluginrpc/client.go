@@ -547,6 +547,96 @@ func (p *storageProvider) OpenWriter(ctx context.Context, name string) (io.Write
 	return pluginClientWriteCloser{WriteCloser: conn, closeClient: running.Close}, nil
 }
 
+func (p *storageProvider) OpenRangeReader(ctx context.Context, name string, offset, length int64) (io.ReadCloser, error) {
+	running, err := p.startClientOperation(ctx, "storage.open_range_reader")
+	if err != nil {
+		return nil, err
+	}
+	payload, err := running.client.instancePayload(ctx, p.inst, p.secrets)
+	if err != nil {
+		running.Close()
+		return nil, err
+	}
+	var reply BrokerReply
+	req := StorageRangeRequest{Instance: payload, Path: name, Offset: offset, Length: length}
+	if err := running.client.client.Call("Plugin.StorageOpenRangeReader", req, &reply); err != nil {
+		running.Close()
+		return nil, decodeRPCError(err)
+	}
+	conn, err := running.client.broker.Dial(reply.ID)
+	if err != nil {
+		running.Close()
+		return nil, err
+	}
+	return pluginClientReadCloser{ReadCloser: closeReadConn{Conn: conn}, closeClient: running.Close}, nil
+}
+
+func (p *storageProvider) OpenRangeWriter(ctx context.Context, name string, offset int64) (io.WriteCloser, error) {
+	running, err := p.startClientOperation(ctx, "storage.open_range_writer")
+	if err != nil {
+		return nil, err
+	}
+	payload, err := running.client.instancePayload(ctx, p.inst, p.secrets)
+	if err != nil {
+		running.Close()
+		return nil, err
+	}
+	var reply BrokerReply
+	req := StorageRangeRequest{Instance: payload, Path: name, Offset: offset}
+	if err := running.client.client.Call("Plugin.StorageOpenRangeWriter", req, &reply); err != nil {
+		running.Close()
+		return nil, decodeRPCError(err)
+	}
+	conn, err := running.client.broker.Dial(reply.ID)
+	if err != nil {
+		running.Close()
+		return nil, err
+	}
+	return pluginClientWriteCloser{WriteCloser: conn, closeClient: running.Close}, nil
+}
+
+func (p *storageProvider) Truncate(ctx context.Context, name string, size int64) error {
+	return p.withClientOperation(ctx, "storage.truncate", func(c *Client) error {
+		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		var reply Empty
+		return c.call(ctx, "Plugin.StorageTruncate", StorageTruncateRequest{Instance: payload, Path: name, Size: size}, &reply)
+	})
+}
+
+// CopyBetweenInstances 请求插件在进程内把同插件另一实例 source 的 sourcePath
+// 复制到本实例 targetPath；source 不是同一插件的实例时返回
+// providers.ErrCrossInstanceCopyUnsupported，调用方应回退到其他复制方式。
+func (p *storageProvider) CopyBetweenInstances(ctx context.Context, source providers.StorageProvider, sourcePath, targetPath string, progress providers.ProgressFunc) error {
+	src, ok := source.(*storageProvider)
+	if !ok || src.session.pluginID() == "" || src.session.pluginID() != p.session.pluginID() {
+		return providers.ErrCrossInstanceCopyUnsupported
+	}
+	return p.withClientOperation(ctx, "storage.copy_between_instances", func(c *Client) error {
+		sourcePayload, err := c.instancePayload(ctx, src.inst, src.secrets)
+		if err != nil {
+			return err
+		}
+		targetPayload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		req := StorageCopyBetweenRequest{
+			Source:     sourcePayload,
+			Target:     targetPayload,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+		}
+		if progress != nil {
+			req.ProgressBrokerID = serveProgressSink(c.broker, progress)
+		}
+		var reply Empty
+		return c.call(ctx, "Plugin.StorageCopyBetween", req, &reply)
+	})
+}
+
 func (p *storageProvider) Rename(ctx context.Context, oldpath, newpath string) error {
 	return p.callRename(ctx, "storage.rename", "Plugin.StorageRename", oldpath, newpath)
 }

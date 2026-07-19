@@ -4,6 +4,7 @@ package pluginrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -200,6 +201,30 @@ type StorageUploadRequest struct {
 	Instance             InstancePayload
 	Path                 string
 	UploadSourceBrokerID uint32
+}
+
+type StorageRangeRequest struct {
+	Instance InstancePayload
+	Path     string
+	Offset   int64
+	// Length 只在区间读取时使用，区间写入忽略。
+	Length int64
+}
+
+type StorageTruncateRequest struct {
+	Instance InstancePayload
+	Path     string
+	Size     int64
+}
+
+// StorageCopyBetweenRequest 让同一插件进程在两个存储实例之间直接复制，
+// 数据不回宿主；ProgressBrokerID 非 0 时插件通过该 broker 流回报累计字节数。
+type StorageCopyBetweenRequest struct {
+	Source           InstancePayload
+	Target           InstancePayload
+	SourcePath       string
+	TargetPath       string
+	ProgressBrokerID uint32
 }
 
 type StoragePlaybackURLRequest struct {
@@ -1146,6 +1171,10 @@ func (e ExternalPlugin) startClientForScopeOperation(ctx context.Context, scopeT
 	})
 }
 
+// streamCopyBufferSize 是 broker 流转发的缓冲大小。SMB 等网络存储的读写
+// 请求大小跟随上游写入块大小，小缓冲会放大网络往返次数。
+const streamCopyBufferSize = 1 << 20
+
 func serveReader(broker *hcplugin.MuxBroker, open func() (io.ReadCloser, error)) uint32 {
 	id := broker.NextId()
 	go func() {
@@ -1159,7 +1188,8 @@ func serveReader(broker *hcplugin.MuxBroker, open func() (io.ReadCloser, error))
 			return
 		}
 		defer reader.Close()
-		_, _ = io.Copy(conn, reader)
+		// struct 包装剥掉 WriterTo/ReaderFrom 捷径，保证大缓冲生效。
+		_, _ = io.CopyBuffer(struct{ io.Writer }{conn}, struct{ io.Reader }{reader}, make([]byte, streamCopyBufferSize))
 	}()
 	return id
 }
@@ -1176,10 +1206,31 @@ func serveWriter(broker *hcplugin.MuxBroker, open func() (io.WriteCloser, error)
 		if err != nil {
 			return
 		}
-		_, copyErr := io.Copy(writer, conn)
+		_, copyErr := io.CopyBuffer(writer, struct{ io.Reader }{conn}, make([]byte, streamCopyBufferSize))
 		closeErr := writer.Close()
 		_ = copyErr
 		_ = closeErr
+	}()
+	return id
+}
+
+// serveProgressSink 在调用方进程开一个 broker 流，接收对端回报的累计字节数
+// （8 字节大端），逐条转发给 progress；对端关闭连接即结束。
+func serveProgressSink(broker *hcplugin.MuxBroker, progress providers.ProgressFunc) uint32 {
+	id := broker.NextId()
+	go func() {
+		conn, err := broker.Accept(id)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 8)
+		for {
+			if _, err := io.ReadFull(conn, buf); err != nil {
+				return
+			}
+			progress(int64(binary.BigEndian.Uint64(buf)))
+		}
 	}()
 	return id
 }

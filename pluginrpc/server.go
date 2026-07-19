@@ -2,6 +2,7 @@ package pluginrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -434,6 +435,112 @@ func (s *rpcServer) StorageOpenWriter(req StoragePathRequest, reply *BrokerReply
 	})
 	reply.ID = id
 	return nil
+}
+
+func (s *rpcServer) StorageOpenRangeReader(req StorageRangeRequest, reply *BrokerReply) error {
+	provider, closeFn, err := s.fileStorage(req.Instance)
+	if err != nil {
+		return err
+	}
+	ranged, ok := provider.(providers.RangeReadProvider)
+	if !ok {
+		closeFn()
+		return fmt.Errorf("插件未实现分段读取")
+	}
+	id := serveReader(s.broker, func() (io.ReadCloser, error) {
+		reader, err := ranged.OpenRangeReader(context.Background(), req.Path, req.Offset, req.Length)
+		closeFn()
+		return reader, err
+	})
+	reply.ID = id
+	return nil
+}
+
+func (s *rpcServer) StorageOpenRangeWriter(req StorageRangeRequest, reply *BrokerReply) error {
+	provider, closeFn, err := s.fileStorage(req.Instance)
+	if err != nil {
+		return err
+	}
+	ranged, ok := provider.(providers.RangeWriteProvider)
+	if !ok {
+		closeFn()
+		return fmt.Errorf("插件未实现分段写入")
+	}
+	id := serveWriter(s.broker, func() (io.WriteCloser, error) {
+		writer, err := ranged.OpenRangeWriter(context.Background(), req.Path, req.Offset)
+		closeFn()
+		return writer, err
+	})
+	reply.ID = id
+	return nil
+}
+
+func (s *rpcServer) StorageTruncate(req StorageTruncateRequest, reply *Empty) error {
+	provider, closeFn, err := s.fileStorage(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	ranged, ok := provider.(providers.RangeWriteProvider)
+	if !ok {
+		return fmt.Errorf("插件未实现分段写入")
+	}
+	return encodeRPCError(ranged.Truncate(context.Background(), req.Path, req.Size))
+}
+
+// StorageCopyBetween 在同一插件进程内的两个存储实例之间复制文件，数据不回宿主。
+// 两侧都支持分段读写且文件够大时自动分段并行，否则退化为进程内流式复制。
+func (s *rpcServer) StorageCopyBetween(req StorageCopyBetweenRequest, reply *Empty) error {
+	source, sourceClose, err := s.fileStorage(req.Source)
+	if err != nil {
+		return err
+	}
+	defer sourceClose()
+	target, targetClose, err := s.fileStorage(req.Target)
+	if err != nil {
+		return err
+	}
+	defer targetClose()
+
+	var progress providers.ProgressFunc
+	if req.ProgressBrokerID != 0 {
+		conn, dialErr := s.broker.Dial(req.ProgressBrokerID)
+		if dialErr == nil {
+			defer conn.Close()
+			progress = func(copied int64) {
+				var buf [8]byte
+				binary.BigEndian.PutUint64(buf[:], uint64(copied))
+				_, _ = conn.Write(buf[:])
+			}
+		}
+	}
+	return encodeRPCError(copyBetweenProviders(context.Background(), source, req.SourcePath, target, req.TargetPath, progress))
+}
+
+func copyBetweenProviders(ctx context.Context, source providers.FileStorageProvider, sourcePath string, target providers.FileStorageProvider, targetPath string, progress providers.ProgressFunc) error {
+	info, err := source.Stat(ctx, sourcePath)
+	if err != nil {
+		return fmt.Errorf("读取源文件信息: %w", err)
+	}
+	rangeSource, canRangeRead := source.(providers.RangeReadProvider)
+	rangeTarget, canRangeWrite := target.(providers.RangeWriteProvider)
+	if canRangeRead && canRangeWrite {
+		return providers.RangeCopy(ctx, rangeSource, sourcePath, info.Size, rangeTarget, targetPath, providers.RangeCopyOptions{Progress: progress})
+	}
+	reader, err := source.OpenReader(ctx, sourcePath)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	writer, err := target.OpenWriter(ctx, targetPath)
+	if err != nil {
+		return err
+	}
+	if _, err := providers.StreamCopy(ctx, writer, reader, providers.RangeCopyOptions{Progress: progress}); err != nil {
+		_ = writer.Close()
+		return err
+	}
+	return writer.Close()
 }
 
 func (s *rpcServer) StorageRename(req StorageRenameRequest, reply *Empty) error {

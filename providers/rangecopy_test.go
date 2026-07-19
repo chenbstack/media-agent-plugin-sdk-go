@@ -1,0 +1,205 @@
+package providers
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"math/rand"
+	"sync"
+	"testing"
+)
+
+// memRangeStore 是内存里的 RangeRead/RangeWrite 双端实现，用于验证分段并行复制。
+type memRangeStore struct {
+	mu    sync.Mutex
+	files map[string][]byte
+
+	openReads  int
+	openWrites int
+	readErr    error
+}
+
+func newMemRangeStore() *memRangeStore {
+	return &memRangeStore{files: map[string][]byte{}}
+}
+
+func (s *memRangeStore) put(name string, data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.files[name] = append([]byte(nil), data...)
+}
+
+func (s *memRangeStore) get(name string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.files[name]...)
+}
+
+func (s *memRangeStore) OpenRangeReader(_ context.Context, name string, offset, length int64) (io.ReadCloser, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.openReads++
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	data, ok := s.files[name]
+	if !ok {
+		return nil, fmt.Errorf("文件不存在: %s", name)
+	}
+	if offset < 0 || offset+length > int64(len(data)) {
+		return nil, fmt.Errorf("读取范围越界")
+	}
+	return io.NopCloser(bytes.NewReader(data[offset : offset+length])), nil
+}
+
+func (s *memRangeStore) Truncate(_ context.Context, name string, size int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.files[name] = make([]byte, size)
+	return nil
+}
+
+func (s *memRangeStore) OpenRangeWriter(_ context.Context, name string, offset int64) (io.WriteCloser, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.openWrites++
+	if _, ok := s.files[name]; !ok {
+		return nil, fmt.Errorf("目标文件未预置: %s", name)
+	}
+	return &memRangeWriter{store: s, name: name, offset: offset}, nil
+}
+
+type memRangeWriter struct {
+	store  *memRangeStore
+	name   string
+	offset int64
+}
+
+func (w *memRangeWriter) Write(p []byte) (int, error) {
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	data := w.store.files[w.name]
+	if w.offset+int64(len(p)) > int64(len(data)) {
+		return 0, fmt.Errorf("写入越界")
+	}
+	copy(data[w.offset:], p)
+	w.offset += int64(len(p))
+	return len(p), nil
+}
+
+func (w *memRangeWriter) Close() error { return nil }
+
+func randomBytes(n int) []byte {
+	data := make([]byte, n)
+	rng := rand.New(rand.NewSource(42))
+	rng.Read(data)
+	return data
+}
+
+func TestRangeCopyParallelSegments(t *testing.T) {
+	source := newMemRangeStore()
+	target := newMemRangeStore()
+	data := randomBytes(4 << 20)
+	source.put("src.bin", data)
+
+	var lastProgress int64
+	var mu sync.Mutex
+	opts := RangeCopyOptions{MaxSegments: 4, MinSegmentSize: 1 << 20, BufferSize: 64 << 10, Progress: func(copied int64) {
+		mu.Lock()
+		lastProgress = copied
+		mu.Unlock()
+	}}
+	if err := RangeCopy(context.Background(), source, "src.bin", int64(len(data)), target, "dst.bin", opts); err != nil {
+		t.Fatalf("RangeCopy: %v", err)
+	}
+	if !bytes.Equal(target.get("dst.bin"), data) {
+		t.Fatalf("目标内容与源不一致")
+	}
+	if source.openReads != 4 || target.openWrites != 4 {
+		t.Fatalf("分段数 = %d/%d, want 4/4", source.openReads, target.openWrites)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if lastProgress != int64(len(data)) {
+		t.Fatalf("最终进度 = %d, want %d", lastProgress, len(data))
+	}
+}
+
+func TestRangeCopySmallFileSingleSegment(t *testing.T) {
+	source := newMemRangeStore()
+	target := newMemRangeStore()
+	data := randomBytes(1000)
+	source.put("src.bin", data)
+
+	if err := RangeCopy(context.Background(), source, "src.bin", int64(len(data)), target, "dst.bin", RangeCopyOptions{}); err != nil {
+		t.Fatalf("RangeCopy: %v", err)
+	}
+	if !bytes.Equal(target.get("dst.bin"), data) {
+		t.Fatalf("目标内容与源不一致")
+	}
+	if source.openReads != 1 {
+		t.Fatalf("小文件应单段复制, openReads = %d", source.openReads)
+	}
+}
+
+func TestRangeCopyZeroSize(t *testing.T) {
+	source := newMemRangeStore()
+	target := newMemRangeStore()
+	source.put("src.bin", nil)
+	if err := RangeCopy(context.Background(), source, "src.bin", 0, target, "dst.bin", RangeCopyOptions{}); err != nil {
+		t.Fatalf("RangeCopy: %v", err)
+	}
+	if got := target.get("dst.bin"); len(got) != 0 {
+		t.Fatalf("零字节文件复制结果 = %d 字节", len(got))
+	}
+	if source.openReads != 0 {
+		t.Fatalf("零字节文件不应打开读取器")
+	}
+}
+
+func TestRangeCopyPropagatesSegmentError(t *testing.T) {
+	source := newMemRangeStore()
+	target := newMemRangeStore()
+	source.put("src.bin", randomBytes(4<<20))
+	wantErr := errors.New("网络断开")
+	source.readErr = wantErr
+
+	err := RangeCopy(context.Background(), source, "src.bin", 4<<20, target, "dst.bin", RangeCopyOptions{MaxSegments: 4, MinSegmentSize: 1 << 20})
+	if err == nil || !errors.Is(err, wantErr) {
+		t.Fatalf("err = %v, want wrap %v", err, wantErr)
+	}
+}
+
+func TestStreamCopyReportsProgress(t *testing.T) {
+	data := randomBytes(256 << 10)
+	var out bytes.Buffer
+	var lastProgress int64
+	var mu sync.Mutex
+	n, err := StreamCopy(context.Background(), &out, bytes.NewReader(data), RangeCopyOptions{Progress: func(copied int64) {
+		mu.Lock()
+		lastProgress = copied
+		mu.Unlock()
+	}})
+	if err != nil {
+		t.Fatalf("StreamCopy: %v", err)
+	}
+	if n != int64(len(data)) || !bytes.Equal(out.Bytes(), data) {
+		t.Fatalf("复制结果不一致: n=%d", n)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if lastProgress != int64(len(data)) {
+		t.Fatalf("最终进度 = %d, want %d", lastProgress, len(data))
+	}
+}
+
+func TestStreamCopyHonorsContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := StreamCopy(ctx, io.Discard, bytes.NewReader(randomBytes(1<<20)), RangeCopyOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
