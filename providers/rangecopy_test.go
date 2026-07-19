@@ -195,6 +195,65 @@ func TestStreamCopyReportsProgress(t *testing.T) {
 	}
 }
 
+func TestRangeCopyAdaptiveSegmentsCappedAt16(t *testing.T) {
+	source := newMemRangeStore()
+	target := newMemRangeStore()
+	data := randomBytes(32 << 20)
+	source.put("src.bin", data)
+
+	// 32MiB / 1MiB 最小段 = 32 段,应封顶在默认上限 16。
+	opts := RangeCopyOptions{MinSegmentSize: 1 << 20, BufferSize: 64 << 10}
+	if err := RangeCopy(context.Background(), source, "src.bin", int64(len(data)), target, "dst.bin", opts); err != nil {
+		t.Fatalf("RangeCopy: %v", err)
+	}
+	if !bytes.Equal(target.get("dst.bin"), data) {
+		t.Fatalf("目标内容与源不一致")
+	}
+	if source.openReads != 16 || target.openWrites != 16 {
+		t.Fatalf("分段数 = %d/%d, want 16/16", source.openReads, target.openWrites)
+	}
+}
+
+func TestPipeCopyOddSizes(t *testing.T) {
+	// 覆盖 空/不足一块/整块/整块+1/多块带尾巴 等边界,验证流水线切块的正确性。
+	for _, size := range []int{0, 1, 4095, 4096, 4097, 40960, 41000} {
+		data := randomBytes(size)
+		var out bytes.Buffer
+		n, err := pipeCopy(context.Background(), &out, bytes.NewReader(data), 4096, nil)
+		if err != nil {
+			t.Fatalf("size=%d: %v", size, err)
+		}
+		if n != int64(size) || !bytes.Equal(out.Bytes(), data) {
+			t.Fatalf("size=%d: 复制结果不一致, n=%d", size, n)
+		}
+	}
+}
+
+type failingWriter struct {
+	writes int
+	err    error
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes >= 2 {
+		return 0, w.err
+	}
+	return len(p), nil
+}
+
+func TestPipeCopyStopsOnWriteError(t *testing.T) {
+	wantErr := errors.New("磁盘已满")
+	w := &failingWriter{err: wantErr}
+	n, err := pipeCopy(context.Background(), w, bytes.NewReader(randomBytes(1<<20)), 4096, nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err = %v, want %v", err, wantErr)
+	}
+	if n != 4096 {
+		t.Fatalf("written = %d, want 4096", n)
+	}
+}
+
 func TestStreamCopyHonorsContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

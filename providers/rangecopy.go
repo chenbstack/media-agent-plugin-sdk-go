@@ -10,19 +10,20 @@ import (
 )
 
 // RangeCopyOptions 控制 RangeCopy / StreamCopy 的分段与进度上报行为；零值使用默认参数。
+// 分段数按文件大小自适应（size/MinSegmentSize，封顶 MaxSegments），调用方一般不需要设置。
 type RangeCopyOptions struct {
-	// MaxSegments 是并行分段数上限，默认 4。
+	// MaxSegments 是并行分段数上限，默认 16；实际分段数按文件大小自适应。
 	MaxSegments int
 	// MinSegmentSize 是单段最小字节数；文件不足两段时退化为单段，默认 64MiB。
 	MinSegmentSize int64
-	// BufferSize 是每段复制缓冲大小，默认 1MiB。
+	// BufferSize 是每段复制缓冲大小，默认 1MiB；每段用两个缓冲做读写流水线。
 	BufferSize int
 	// Progress 是进度回调，见 ProgressFunc；nil 表示不上报。
 	Progress ProgressFunc
 }
 
 const (
-	defaultRangeCopyMaxSegments    = 4
+	defaultRangeCopyMaxSegments    = 16
 	defaultRangeCopyMinSegmentSize = int64(64 << 20)
 	defaultRangeCopyBufferSize     = 1 << 20
 	progressReportInterval         = 500 * time.Millisecond
@@ -108,9 +109,8 @@ func copySegment(ctx context.Context, source RangeReadProvider, sourcePath strin
 	if err != nil {
 		return fmt.Errorf("打开目标分段 %d: %w", offset, err)
 	}
-	buf := make([]byte, bufferSize)
-	// LimitReader 防御实现多给数据，同时剥掉可能的 WriterTo 让缓冲生效。
-	n, err := io.CopyBuffer(&countingContextWriter{ctx: ctx, w: writer, copied: copied}, io.LimitReader(reader, length), buf)
+	// LimitReader 防御实现多给数据。
+	n, err := pipeCopy(ctx, writer, io.LimitReader(reader, length), bufferSize, copied)
 	if err != nil {
 		_ = writer.Close()
 		return fmt.Errorf("复制分段 [%d,%d): %w", offset, offset+length, err)
@@ -125,14 +125,12 @@ func copySegment(ctx context.Context, source RangeReadProvider, sourcePath strin
 }
 
 // StreamCopy 用 BufferSize 缓冲把 r 全量拷到 w，期间按 Progress 节流上报累计字节数。
-// 返回写入的字节数；ctx 取消会让下一次写入尽快失败。
+// 返回写入的字节数；ctx 取消会让复制尽快失败。
 func StreamCopy(ctx context.Context, w io.Writer, r io.Reader, opts RangeCopyOptions) (int64, error) {
 	opts = opts.withDefaults()
 	var copied atomic.Int64
 	stop := startProgressReporter(&copied, opts.Progress)
-	buf := make([]byte, opts.BufferSize)
-	// struct 包装剥掉 r 可能实现的 WriterTo，保证 CopyBuffer 使用我们的缓冲。
-	n, err := io.CopyBuffer(&countingContextWriter{ctx: ctx, w: w, copied: &copied}, struct{ io.Reader }{r}, buf)
+	n, err := pipeCopy(ctx, w, r, opts.BufferSize, &copied)
 	stop()
 	if err == nil {
 		reportProgressFinal(opts.Progress, n)
@@ -140,21 +138,75 @@ func StreamCopy(ctx context.Context, w io.Writer, r io.Reader, opts RangeCopyOpt
 	return n, err
 }
 
-type countingContextWriter struct {
-	ctx    context.Context
-	w      io.Writer
-	copied *atomic.Int64
-}
+// pipeCopy 用双缓冲把读和写重叠起来：读端预取下一块的同时写端在写上一块，
+// 单条流的耗时从 读+写 之和变成两者取大。返回写入的字节数。
+// 两个缓冲总量固定（2×bufferSize），读端最多领先写端一块，不会无界占内存。
+func pipeCopy(ctx context.Context, dst io.Writer, src io.Reader, bufferSize int, copied *atomic.Int64) (int64, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-func (w *countingContextWriter) Write(p []byte) (int, error) {
-	if err := w.ctx.Err(); err != nil {
-		return 0, err
+	type chunk struct {
+		buf []byte
+		n   int
 	}
-	n, err := w.w.Write(p)
-	if n > 0 && w.copied != nil {
-		w.copied.Add(int64(n))
+	free := make(chan []byte, 2)
+	full := make(chan chunk, 2)
+	free <- make([]byte, bufferSize)
+	free <- make([]byte, bufferSize)
+	readErr := make(chan error, 1)
+
+	go func() {
+		defer close(full)
+		for {
+			var buf []byte
+			select {
+			case <-ctx.Done():
+				readErr <- ctx.Err()
+				return
+			case buf = <-free:
+			}
+			n, err := io.ReadFull(src, buf)
+			if n > 0 {
+				select {
+				case <-ctx.Done():
+					readErr <- ctx.Err()
+					return
+				case full <- chunk{buf: buf, n: n}:
+				}
+			}
+			switch err {
+			case nil:
+			case io.EOF, io.ErrUnexpectedEOF:
+				readErr <- nil
+				return
+			default:
+				readErr <- err
+				return
+			}
+		}
+	}()
+
+	var written int64
+	for c := range full {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+		n, err := dst.Write(c.buf[:c.n])
+		if n > 0 {
+			written += int64(n)
+			if copied != nil {
+				copied.Add(int64(n))
+			}
+		}
+		if err != nil {
+			return written, err
+		}
+		if n != c.n {
+			return written, io.ErrShortWrite
+		}
+		free <- c.buf
 	}
-	return n, err
+	return written, <-readErr
 }
 
 func startProgressReporter(copied *atomic.Int64, progress ProgressFunc) func() {
