@@ -6,7 +6,7 @@ The SDK is currently in the `v0.x` development phase. Pin a tagged version so
 host and plugin builds use the same contracts:
 
 ```bash
-go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.1.0
+go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.18.0
 ```
 
 ## Packages
@@ -47,6 +47,21 @@ plugin-owned UI copy. When `status_action` is present, the host polls that
 action and renders its standard action-progress payload in the onboarding
 page. This keeps business behavior and progress state inside the plugin while
 the host provides only generic orchestration and presentation.
+
+## Full-stack UI and identity extensions
+
+Signed full-stack plugins can declare `ui.module` routes and `ui.action`
+components in the same versioned module. Actions target host-owned slots and
+receive only a structured resource context. Manifest permission predicates are
+presentation filters; plugin APIs and Host APIs must still authorize every
+operation.
+
+An `identity.provider` declares one or more `credentials` or `oidc` flows.
+Credential-only providers continue implementing `IdentityProvider`. Redirect
+flows additionally implement `IdentityRedirectProvider`; the host supplies the
+callback URL and one-time state, stores bounded opaque challenge data, maps the
+verified principal, and remains the sole issuer of its session cookie. CAS is
+not part of this contract.
 
 ## Domain migration capabilities
 

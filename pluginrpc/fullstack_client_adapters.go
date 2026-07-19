@@ -14,7 +14,8 @@ func (c *Client) API(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) 
 }
 
 // Identity returns an identity.provider adapter bound to this logical Client.
-// It only verifies credentials; it cannot mint a host session.
+// It verifies credentials and forwards optional redirect flows; it can never
+// mint a host session.
 func (c *Client) Identity(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) pluginsdk.IdentityProvider {
 	return &identityProvider{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
 }
@@ -50,6 +51,7 @@ type identityProvider struct {
 }
 
 var _ pluginsdk.IdentityProvider = (*identityProvider)(nil)
+var _ pluginsdk.IdentityRedirectProvider = (*identityProvider)(nil)
 
 func (p *identityProvider) VerifyIdentity(ctx context.Context, request pluginsdk.IdentityVerifyRequest) (pluginsdk.IdentityVerification, error) {
 	var verification pluginsdk.IdentityVerification
@@ -60,6 +62,38 @@ func (p *identityProvider) VerifyIdentity(ctx context.Context, request pluginsdk
 		}
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.IdentityVerify", IdentityVerifyRequest{Instance: instance, Request: request}, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &verification)
+	})
+	return verification, err
+}
+
+func (p *identityProvider) BeginIdentity(ctx context.Context, request pluginsdk.IdentityBeginRequest) (pluginsdk.IdentityChallenge, error) {
+	var challenge pluginsdk.IdentityChallenge
+	err := p.session.withClient(ctx, "identity.begin", func(c *Client) error {
+		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.IdentityBegin", IdentityBeginRequest{Instance: instance, Request: request}, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &challenge)
+	})
+	return challenge, err
+}
+
+func (p *identityProvider) CompleteIdentity(ctx context.Context, request pluginsdk.IdentityCompleteRequest) (pluginsdk.IdentityVerification, error) {
+	var verification pluginsdk.IdentityVerification
+	err := p.session.withClient(ctx, "identity.complete", func(c *Client) error {
+		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.IdentityComplete", IdentityCompleteRequest{Instance: instance, Request: request}, &reply); err != nil {
 			return err
 		}
 		return decodeJSON(reply.Data, &verification)

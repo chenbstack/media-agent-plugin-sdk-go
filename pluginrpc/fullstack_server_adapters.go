@@ -43,6 +43,50 @@ func (s *rpcServer) IdentityVerify(req IdentityVerifyRequest, reply *JSONReply) 
 	return nil
 }
 
+func (s *rpcServer) IdentityBegin(req IdentityBeginRequest, reply *JSONReply) error {
+	provider, closeFn, err := s.identity(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	redirect, ok := provider.(pluginsdk.IdentityRedirectProvider)
+	if !ok {
+		return fmt.Errorf("插件未实现 IdentityRedirectProvider")
+	}
+	challenge, err := redirect.BeginIdentity(context.Background(), req.Request)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(challenge)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *rpcServer) IdentityComplete(req IdentityCompleteRequest, reply *JSONReply) error {
+	provider, closeFn, err := s.identity(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	redirect, ok := provider.(pluginsdk.IdentityRedirectProvider)
+	if !ok {
+		return fmt.Errorf("插件未实现 IdentityRedirectProvider")
+	}
+	verification, err := redirect.CompleteIdentity(context.Background(), req.Request)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(verification)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) api(payload InstancePayload) (pluginsdk.APIProvider, func(), error) {
 	if s.plugin.NewAPI == nil {
 		return nil, nil, fmt.Errorf("插件未实现 APIProvider")

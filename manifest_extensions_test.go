@@ -15,6 +15,7 @@ type: cli
 capabilities:
   - api.endpoint
   - ui.module
+  - ui.action
   - identity.provider
 api:
   service: app
@@ -34,8 +35,23 @@ ui:
         label: 订阅申请
         icon: rss
         order: 20
+  actions:
+    - id: family.request
+      slot: media.detail.primary-actions
+      export: MediaRequestAction
+      required_entitlements:
+        - collaboration.requests.enabled
+      required_permissions: [request.create]
+      forbidden_permissions: [system_settings.manage]
 identity:
   service: family
+  flows:
+    - id: local
+      type: credentials
+      label: 媒体用户
+    - id: company
+      type: oidc
+      label: 公司账号
   required_entitlements:
     - collaboration.users.max
 entitlements:
@@ -56,10 +72,10 @@ resources:
 	if manifest.API == nil || manifest.API.Service != "app" {
 		t.Fatalf("api = %#v", manifest.API)
 	}
-	if manifest.UI == nil || len(manifest.UI.Routes) != 1 || manifest.UI.Routes[0].Menu == nil {
+	if manifest.UI == nil || len(manifest.UI.Routes) != 1 || len(manifest.UI.Actions) != 1 || manifest.UI.Routes[0].Menu == nil {
 		t.Fatalf("ui = %#v", manifest.UI)
 	}
-	if manifest.Identity == nil || manifest.Identity.Service != "family" {
+	if manifest.Identity == nil || manifest.Identity.Service != "family" || len(manifest.Identity.Flows) != 2 {
 		t.Fatalf("identity = %#v", manifest.Identity)
 	}
 
@@ -95,11 +111,11 @@ func TestManifestExtensionsRemainOptionalForLegacyPlugins(t *testing.T) {
 func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *testing.T) {
 	valid := Manifest{
 		ID: "family", Name: "Family", Version: "1", Type: "builtin",
-		Capabilities: []string{"api.endpoint", "ui.module"},
+		Capabilities: []string{"api.endpoint", "ui.module", "ui.action"},
 		API:          &APIExtension{Service: "app", Auth: "session"},
 		UI: &UIExtension{Module: "ui/index.js", Routes: []UIRoute{{
 			ID: "family.requests", Path: "/plugin/family/requests", Export: "RequestsPage",
-		}}},
+		}}, Actions: []UIAction{{ID: "family.request", Slot: "media.detail.primary-actions", Export: "MediaRequestAction"}}},
 	}
 
 	tests := []struct {
@@ -113,6 +129,11 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "encoded traversal module", edit: func(m *Manifest) { m.UI.Module = "%2e%2e/ui.js" }, want: "相对路径"},
 		{name: "traversal module", edit: func(m *Manifest) { m.UI.Module = "../ui.js" }, want: "不能越界"},
 		{name: "duplicate route", edit: func(m *Manifest) { m.UI.Routes = append(m.UI.Routes, m.UI.Routes[0]) }, want: "route id 重复"},
+		{name: "action without capability", edit: func(m *Manifest) {
+			m.Capabilities = []string{"api.endpoint", "ui.module"}
+		}, want: "ui.actions"},
+		{name: "action duplicates route id", edit: func(m *Manifest) { m.UI.Actions[0].ID = m.UI.Routes[0].ID }, want: "扩展 id 重复"},
+		{name: "invalid action slot", edit: func(m *Manifest) { m.UI.Actions[0].Slot = "media/detail" }, want: "slot"},
 		{name: "relative route", edit: func(m *Manifest) { m.UI.Routes[0].Path = "plugin/family" }, want: "path"},
 		{name: "undeclared entitlement", edit: func(m *Manifest) {
 			m.UI.Routes[0].RequiredEntitlements = []string{"collaboration.requests.enabled"}

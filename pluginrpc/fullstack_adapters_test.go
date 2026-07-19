@@ -58,6 +58,16 @@ func TestFullStackAdaptersUseDispensedClient(t *testing.T) {
 	if !verification.Authenticated || verification.Principal == nil || verification.Principal.ID != "user-alice" {
 		t.Fatalf("verification = %#v", verification)
 	}
+	challengeRequest := pluginsdk.IdentityBeginRequest{FlowID: "oidc", CallbackURL: "https://host.test/callback", State: "state-1"}
+	challenge, err := client.Identity(inst, nil).(pluginsdk.IdentityRedirectProvider).BeginIdentity(context.Background(), challengeRequest)
+	if err != nil || challenge.RedirectURL != "https://idp.test/authorize?state=state-1" || !reflect.DeepEqual(identity.beginRequest, challengeRequest) {
+		t.Fatalf("challenge=%#v request=%#v err=%v", challenge, identity.beginRequest, err)
+	}
+	completeRequest := pluginsdk.IdentityCompleteRequest{FlowID: "oidc", CallbackURL: challengeRequest.CallbackURL, Parameters: map[string][]string{"code": {"code-1"}}, Data: []byte("verifier")}
+	completed, err := client.Identity(inst, nil).(pluginsdk.IdentityRedirectProvider).CompleteIdentity(context.Background(), completeRequest)
+	if err != nil || !completed.Authenticated || completed.Principal == nil || completed.Principal.Subject != "oidc-user" || !reflect.DeepEqual(identity.completeRequest, completeRequest) {
+		t.Fatalf("completed=%#v request=%#v err=%v", completed, identity.completeRequest, err)
+	}
 	data, err := json.Marshal(verification)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +112,19 @@ func (p *recordingAPIProvider) HandleAPI(_ context.Context, request pluginsdk.AP
 }
 
 type recordingIdentityProvider struct {
-	request pluginsdk.IdentityVerifyRequest
+	request         pluginsdk.IdentityVerifyRequest
+	beginRequest    pluginsdk.IdentityBeginRequest
+	completeRequest pluginsdk.IdentityCompleteRequest
+}
+
+func (p *recordingIdentityProvider) BeginIdentity(_ context.Context, request pluginsdk.IdentityBeginRequest) (pluginsdk.IdentityChallenge, error) {
+	p.beginRequest = request
+	return pluginsdk.IdentityChallenge{RedirectURL: "https://idp.test/authorize?state=" + request.State, Data: []byte("verifier")}, nil
+}
+
+func (p *recordingIdentityProvider) CompleteIdentity(_ context.Context, request pluginsdk.IdentityCompleteRequest) (pluginsdk.IdentityVerification, error) {
+	p.completeRequest = request
+	return pluginsdk.IdentityVerification{Authenticated: true, Principal: &pluginsdk.Principal{ID: "oidc-user", Issuer: "https://idp.test", Subject: "oidc-user"}}, nil
 }
 
 func (p *recordingIdentityProvider) VerifyIdentity(_ context.Context, request pluginsdk.IdentityVerifyRequest) (pluginsdk.IdentityVerification, error) {

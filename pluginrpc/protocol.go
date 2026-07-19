@@ -397,6 +397,16 @@ type IdentityVerifyRequest struct {
 	Request  pluginsdk.IdentityVerifyRequest
 }
 
+type IdentityBeginRequest struct {
+	Instance InstancePayload
+	Request  pluginsdk.IdentityBeginRequest
+}
+
+type IdentityCompleteRequest struct {
+	Instance InstancePayload
+	Request  pluginsdk.IdentityCompleteRequest
+}
+
 func encodeJSON(value any) (JSONReply, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
