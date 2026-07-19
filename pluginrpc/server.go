@@ -311,7 +311,7 @@ func (s *rpcServer) StorageTest(req InstancePayload, reply *Empty) error {
 		return err
 	}
 	defer closeFn()
-	return provider.TestConnection(context.Background())
+	return encodeRPCError(provider.TestConnection(context.Background()))
 }
 
 func (s *rpcServer) StorageInfo(req InstancePayload, reply *JSONReply) error {
@@ -322,7 +322,7 @@ func (s *rpcServer) StorageInfo(req InstancePayload, reply *JSONReply) error {
 	defer closeFn()
 	info, err := provider.Info(context.Background())
 	if err != nil {
-		return err
+		return encodeRPCError(err)
 	}
 	out, err := encodeJSON(info)
 	if err != nil {
@@ -338,7 +338,7 @@ func (s *rpcServer) StorageEnsureMounted(req InstancePayload, reply *Empty) erro
 		return err
 	}
 	defer closeFn()
-	return provider.EnsureMounted(context.Background())
+	return encodeRPCError(provider.EnsureMounted(context.Background()))
 }
 
 func (s *rpcServer) StorageUnmount(req InstancePayload, reply *Empty) error {
@@ -347,7 +347,7 @@ func (s *rpcServer) StorageUnmount(req InstancePayload, reply *Empty) error {
 		return err
 	}
 	defer closeFn()
-	return provider.Unmount(context.Background())
+	return encodeRPCError(provider.Unmount(context.Background()))
 }
 
 func (s *rpcServer) StorageStat(req StoragePathRequest, reply *JSONReply) error {
@@ -358,7 +358,7 @@ func (s *rpcServer) StorageStat(req StoragePathRequest, reply *JSONReply) error 
 	defer closeFn()
 	info, err := provider.Stat(context.Background(), req.Path)
 	if err != nil {
-		return err
+		return encodeRPCError(err)
 	}
 	out, err := encodeJSON(info)
 	if err != nil {
@@ -380,7 +380,7 @@ func (s *rpcServer) StorageListDir(req StoragePathRequest, reply *JSONReply) err
 	}
 	entries, err := lister.ListDir(context.Background(), req.Path)
 	if err != nil {
-		return err
+		return encodeRPCError(err)
 	}
 	out, err := encodeJSON(entries)
 	if err != nil {
@@ -396,7 +396,7 @@ func (s *rpcServer) StorageMkdirAll(req StoragePathRequest, reply *Empty) error 
 		return err
 	}
 	defer closeFn()
-	return provider.MkdirAll(context.Background(), req.Path)
+	return encodeRPCError(provider.MkdirAll(context.Background(), req.Path))
 }
 
 func (s *rpcServer) StorageRemove(req StoragePathRequest, reply *Empty) error {
@@ -405,7 +405,7 @@ func (s *rpcServer) StorageRemove(req StoragePathRequest, reply *Empty) error {
 		return err
 	}
 	defer closeFn()
-	return provider.Remove(context.Background(), req.Path)
+	return encodeRPCError(provider.Remove(context.Background(), req.Path))
 }
 
 func (s *rpcServer) StorageOpenReader(req StoragePathRequest, reply *BrokerReply) error {
@@ -442,7 +442,7 @@ func (s *rpcServer) StorageRename(req StorageRenameRequest, reply *Empty) error 
 		return err
 	}
 	defer closeFn()
-	return provider.Rename(context.Background(), req.OldPath, req.NewPath)
+	return encodeRPCError(provider.Rename(context.Background(), req.OldPath, req.NewPath))
 }
 
 func (s *rpcServer) StorageLink(req StorageRenameRequest, reply *Empty) error {
@@ -451,7 +451,7 @@ func (s *rpcServer) StorageLink(req StorageRenameRequest, reply *Empty) error {
 		return err
 	}
 	defer closeFn()
-	return provider.Link(context.Background(), req.OldPath, req.NewPath)
+	return encodeRPCError(provider.Link(context.Background(), req.OldPath, req.NewPath))
 }
 
 func (s *rpcServer) StorageSymlink(req StorageRenameRequest, reply *Empty) error {
@@ -460,7 +460,7 @@ func (s *rpcServer) StorageSymlink(req StorageRenameRequest, reply *Empty) error
 		return err
 	}
 	defer closeFn()
-	return provider.Symlink(context.Background(), req.OldPath, req.NewPath)
+	return encodeRPCError(provider.Symlink(context.Background(), req.OldPath, req.NewPath))
 }
 
 func (s *rpcServer) StorageCopy(req StorageRenameRequest, reply *Empty) error {
@@ -473,7 +473,7 @@ func (s *rpcServer) StorageCopy(req StorageRenameRequest, reply *Empty) error {
 	if !ok {
 		return fmt.Errorf("插件未实现服务端复制")
 	}
-	return copyProvider.Copy(context.Background(), req.OldPath, req.NewPath)
+	return encodeRPCError(copyProvider.Copy(context.Background(), req.OldPath, req.NewPath))
 }
 
 func (s *rpcServer) StorageUpload(req StorageUploadRequest, reply *Empty) error {
@@ -496,7 +496,7 @@ func (s *rpcServer) StorageUpload(req StorageUploadRequest, reply *Empty) error 
 	defer conn.Close()
 	source := &remoteUploadSource{client: rpc.NewClient(conn), broker: s.broker}
 	defer source.client.Close()
-	return uploadProvider.Upload(context.Background(), req.Path, source)
+	return encodeRPCError(uploadProvider.Upload(context.Background(), req.Path, source))
 }
 
 func (s *rpcServer) StorageResolvePlaybackURL(req StoragePlaybackURLRequest, reply *JSONReply) error {
@@ -511,7 +511,7 @@ func (s *rpcServer) StorageResolvePlaybackURL(req StoragePlaybackURLRequest, rep
 	}
 	result, err := playbackProvider.ResolvePlaybackURL(context.Background(), req.Input)
 	if err != nil {
-		return err
+		return encodeRPCError(err)
 	}
 	out, err := encodeJSON(result)
 	if err != nil {

@@ -264,7 +264,7 @@ func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply
 	call := c.client.Go(serviceMethod, args, reply, nil)
 	select {
 	case done := <-call.Done:
-		return done.Error
+		return decodeRPCError(done.Error)
 	case <-ctx.Done():
 		return fmt.Errorf("%s: %w", serviceMethod, ctx.Err())
 	}
