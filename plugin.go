@@ -94,9 +94,40 @@ const (
 // UIExtension 声明随已验签制品分发的前端模块及其页面。Module 必须是制品内的
 // 相对路径，不能是远程 URL；宿主仍需根据签名和发布策略决定是否允许同源加载。
 type UIExtension struct {
-	Module  string     `yaml:"module" json:"module"`
-	Routes  []UIRoute  `yaml:"routes,omitempty" json:"routes,omitempty"`
-	Actions []UIAction `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Module   string      `yaml:"module" json:"module"`
+	Routes   []UIRoute   `yaml:"routes,omitempty" json:"routes,omitempty"`
+	Actions  []UIAction  `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Cards    []UICard    `yaml:"cards,omitempty" json:"cards,omitempty"`
+	Tabs     []UITab     `yaml:"tabs,omitempty" json:"tabs,omitempty"`
+	Settings *UISettings `yaml:"settings,omitempty" json:"settings,omitempty"`
+}
+
+// UICard 声明系统总览页的插件卡片。Size 是宿主网格档位（metric/half/full），
+// 内部由导出组件完全自定义。刻意没有 order：展示与排序属于用户偏好，由宿主的
+// 用户自定义配置决定。权限谓词只做展示过滤，插件 API 仍必须独立鉴权。
+type UICard struct {
+	ID                   string   `yaml:"id" json:"id"`
+	Size                 string   `yaml:"size" json:"size"`
+	Export               string   `yaml:"export" json:"export"`
+	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	RequiredPermissions  []string `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
+	ForbiddenPermissions []string `yaml:"forbidden_permissions,omitempty" json:"forbidden_permissions,omitempty"`
+}
+
+// UITab 声明插件详情弹窗的自定义 tab：与宿主内置的设置/能力/权限同级，按声明
+// 顺序排在内置 tab 之前，第一个自定义 tab 是打开弹窗时的默认 tab。
+type UITab struct {
+	ID                   string   `yaml:"id" json:"id"`
+	Label                string   `yaml:"label" json:"label"`
+	Export               string   `yaml:"export" json:"export"`
+	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+}
+
+// UISettings 把插件配置弹窗的设置区域替换或扩展为完全自定义的面板。
+// Mode 为 replace（默认，整体替换 schema 表单）或 extend（追加在表单之后）。
+type UISettings struct {
+	Export string `yaml:"export" json:"export"`
+	Mode   string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // UIRoute 是插件前端模块导出的一个页面。默认路由应位于
@@ -713,8 +744,8 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 		if err := validateAssetPath(m.UI.Module); err != nil {
 			return fmt.Errorf("插件 %s: ui.module %w", m.ID, err)
 		}
-		if len(m.UI.Routes) == 0 && len(m.UI.Actions) == 0 {
-			return fmt.Errorf("插件 %s: ui.routes 和 ui.actions 不能同时为空", m.ID)
+		if len(m.UI.Routes) == 0 && len(m.UI.Actions) == 0 && len(m.UI.Cards) == 0 && len(m.UI.Tabs) == 0 && m.UI.Settings == nil {
+			return fmt.Errorf("插件 %s: ui 至少需要声明 routes、actions、cards、tabs 或 settings 之一", m.ID)
 		}
 		if len(m.UI.Actions) > 0 && !hasUIActions {
 			return fmt.Errorf("插件 %s: 声明 ui.actions 时必须包含 capability ui.action", m.ID)
@@ -774,6 +805,60 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 			}
 			if err := validateIdentityKeys(m.ID, "ui action "+action.ID+" forbidden_permissions", action.ForbiddenPermissions); err != nil {
 				return err
+			}
+		}
+		for _, card := range m.UI.Cards {
+			if !manifestIdentifier.MatchString(card.ID) {
+				return fmt.Errorf("插件 %s: ui card id %q 格式无效", m.ID, card.ID)
+			}
+			if _, exists := actionIDs[card.ID]; exists {
+				return fmt.Errorf("插件 %s: ui 扩展 id 重复 %q", m.ID, card.ID)
+			}
+			actionIDs[card.ID] = struct{}{}
+			switch card.Size {
+			case "metric", "half", "full":
+			default:
+				return fmt.Errorf("插件 %s: ui card %s 的 size %q 只支持 metric、half 或 full", m.ID, card.ID, card.Size)
+			}
+			if !manifestIdentifier.MatchString(card.Export) {
+				return fmt.Errorf("插件 %s: ui card %s 的 export %q 格式无效", m.ID, card.ID, card.Export)
+			}
+			if _, err := validateEntitlements(m.ID, "ui card "+card.ID, card.RequiredEntitlements, declaredEntitlements); err != nil {
+				return err
+			}
+			if err := validateIdentityKeys(m.ID, "ui card "+card.ID+" required_permissions", card.RequiredPermissions); err != nil {
+				return err
+			}
+			if err := validateIdentityKeys(m.ID, "ui card "+card.ID+" forbidden_permissions", card.ForbiddenPermissions); err != nil {
+				return err
+			}
+		}
+		for _, tab := range m.UI.Tabs {
+			if !manifestIdentifier.MatchString(tab.ID) {
+				return fmt.Errorf("插件 %s: ui tab id %q 格式无效", m.ID, tab.ID)
+			}
+			if _, exists := actionIDs[tab.ID]; exists {
+				return fmt.Errorf("插件 %s: ui 扩展 id 重复 %q", m.ID, tab.ID)
+			}
+			actionIDs[tab.ID] = struct{}{}
+			if strings.TrimSpace(tab.Label) == "" {
+				return fmt.Errorf("插件 %s: ui tab %s 缺少 label", m.ID, tab.ID)
+			}
+			if !manifestIdentifier.MatchString(tab.Export) {
+				return fmt.Errorf("插件 %s: ui tab %s 的 export %q 格式无效", m.ID, tab.ID, tab.Export)
+			}
+			if _, err := validateEntitlements(m.ID, "ui tab "+tab.ID, tab.RequiredEntitlements, declaredEntitlements); err != nil {
+				return err
+			}
+		}
+		if m.UI.Settings != nil {
+			if !manifestIdentifier.MatchString(m.UI.Settings.Export) {
+				return fmt.Errorf("插件 %s: ui settings 的 export %q 格式无效", m.ID, m.UI.Settings.Export)
+			}
+			switch m.UI.Settings.Mode {
+			case "", "replace", "extend":
+			default:
+				return fmt.Errorf("插件 %s: ui settings 的 mode %q 只支持 replace 或 extend", m.ID, m.UI.Settings.Mode)
 			}
 		}
 	}
