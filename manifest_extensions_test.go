@@ -43,6 +43,12 @@ ui:
         - collaboration.requests.enabled
       required_permissions: [request.create]
       forbidden_permissions: [system_settings.manage]
+  cards:
+    - id: family.overview
+      size: half
+      export: OverviewCard
+      title: 家庭总览
+      header_export: OverviewCardHeader
 identity:
   service: family
   flows:
@@ -74,6 +80,9 @@ resources:
 	}
 	if manifest.UI == nil || len(manifest.UI.Routes) != 1 || len(manifest.UI.Actions) != 1 || manifest.UI.Routes[0].Menu == nil {
 		t.Fatalf("ui = %#v", manifest.UI)
+	}
+	if len(manifest.UI.Cards) != 1 || manifest.UI.Cards[0].Title != "家庭总览" || manifest.UI.Cards[0].HeaderExport != "OverviewCardHeader" {
+		t.Fatalf("cards = %#v", manifest.UI.Cards)
 	}
 	if manifest.Identity == nil || manifest.Identity.Service != "family" || len(manifest.Identity.Flows) != 2 {
 		t.Fatalf("identity = %#v", manifest.Identity)
@@ -141,6 +150,12 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "api without capability", edit: func(m *Manifest) {
 			m.Capabilities = []string{"ui.module"}
 		}, want: "声明 api"},
+		{name: "card header export without title", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", HeaderExport: "CardHeaderExtra"}}
+		}, want: "缺少 title"},
+		{name: "card header export invalid", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Title: "家庭卡片", HeaderExport: "bad name"}}
+		}, want: "header_export"},
 	}
 
 	for _, tt := range tests {
