@@ -12,9 +12,9 @@ const CapabilityScheduledTask = "scheduled_task.run"
 type ScheduledTaskExecutorKind string
 
 const (
-	ScheduledTaskExecutorPluginHandler ScheduledTaskExecutorKind = "plugin_handler"
-	ScheduledTaskExecutorHostWorkflow  ScheduledTaskExecutorKind = "host_workflow"
-	ScheduledTaskWorkflowSiteCredentialsSync                       = "site_credentials.sync"
+	ScheduledTaskExecutorPluginHandler       ScheduledTaskExecutorKind = "plugin_handler"
+	ScheduledTaskExecutorHostWorkflow        ScheduledTaskExecutorKind = "host_workflow"
+	ScheduledTaskWorkflowSiteCredentialsSync                           = "site_credentials.sync"
 )
 
 type ScheduledTaskOverlapPolicy string
@@ -24,23 +24,31 @@ const (
 	ScheduledTaskOverlapQueue ScheduledTaskOverlapPolicy = "queue"
 )
 
+// ScheduledTaskIntervalOption is one selectable run interval. When a task
+// declares options the host restricts interval updates to the declared set.
+type ScheduledTaskIntervalOption struct {
+	Label   string `yaml:"label,omitempty" json:"label,omitempty"`
+	Seconds int    `yaml:"seconds" json:"seconds"`
+}
+
 // ScheduledTaskDefinition declares one host-managed periodic task. The host
 // owns persistence, timing, retries and lifecycle reconciliation; plugins must
 // not start their own timers.
 type ScheduledTaskDefinition struct {
-	ID                     string                     `yaml:"id" json:"id"`
-	Name                   string                     `yaml:"name" json:"name"`
-	Description            string                     `yaml:"description,omitempty" json:"description,omitempty"`
-	DefaultEnabled         bool                       `yaml:"default_enabled,omitempty" json:"default_enabled,omitempty"`
-	DefaultIntervalSeconds int                        `yaml:"default_interval_seconds" json:"default_interval_seconds"`
-	MinIntervalSeconds     int                        `yaml:"min_interval_seconds,omitempty" json:"min_interval_seconds,omitempty"`
-	MaxIntervalSeconds     int                        `yaml:"max_interval_seconds,omitempty" json:"max_interval_seconds,omitempty"`
-	TimeoutSeconds         int                        `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
-	MaxAttempts            int                        `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty"`
-	OverlapPolicy          ScheduledTaskOverlapPolicy `yaml:"overlap_policy,omitempty" json:"overlap_policy,omitempty"`
-	Executor               ScheduledTaskExecutor      `yaml:"executor" json:"executor"`
-	Permissions            *Permissions               `yaml:"permissions,omitempty" json:"permissions,omitempty"`
-	RequiredEntitlements   []string                   `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	ID                     string                        `yaml:"id" json:"id"`
+	Name                   string                        `yaml:"name" json:"name"`
+	Description            string                        `yaml:"description,omitempty" json:"description,omitempty"`
+	DefaultEnabled         bool                          `yaml:"default_enabled,omitempty" json:"default_enabled,omitempty"`
+	DefaultIntervalSeconds int                           `yaml:"default_interval_seconds" json:"default_interval_seconds"`
+	MinIntervalSeconds     int                           `yaml:"min_interval_seconds,omitempty" json:"min_interval_seconds,omitempty"`
+	MaxIntervalSeconds     int                           `yaml:"max_interval_seconds,omitempty" json:"max_interval_seconds,omitempty"`
+	IntervalOptions        []ScheduledTaskIntervalOption `yaml:"interval_options,omitempty" json:"interval_options,omitempty"`
+	TimeoutSeconds         int                           `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
+	MaxAttempts            int                           `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty"`
+	OverlapPolicy          ScheduledTaskOverlapPolicy    `yaml:"overlap_policy,omitempty" json:"overlap_policy,omitempty"`
+	Executor               ScheduledTaskExecutor         `yaml:"executor" json:"executor"`
+	Permissions            *Permissions                  `yaml:"permissions,omitempty" json:"permissions,omitempty"`
+	RequiredEntitlements   []string                      `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
 }
 
 type ScheduledTaskExecutor struct {
@@ -66,6 +74,23 @@ func (d ScheduledTaskDefinition) Validate(pluginID string, parent Permissions, d
 	}
 	if d.MinIntervalSeconds > 0 && d.MaxIntervalSeconds > 0 && d.MinIntervalSeconds > d.MaxIntervalSeconds {
 		return fmt.Errorf("插件 %s scheduled task %s: 最小周期大于最大周期", pluginID, d.ID)
+	}
+	if len(d.IntervalOptions) > 0 {
+		defaultDeclared := false
+		for _, option := range d.IntervalOptions {
+			if option.Seconds <= 0 {
+				return fmt.Errorf("插件 %s scheduled task %s: interval_options 的 seconds 必须为正数", pluginID, d.ID)
+			}
+			if (d.MinIntervalSeconds > 0 && option.Seconds < d.MinIntervalSeconds) || (d.MaxIntervalSeconds > 0 && option.Seconds > d.MaxIntervalSeconds) {
+				return fmt.Errorf("插件 %s scheduled task %s: interval_options 超出 interval 边界", pluginID, d.ID)
+			}
+			if option.Seconds == d.DefaultIntervalSeconds {
+				defaultDeclared = true
+			}
+		}
+		if !defaultDeclared {
+			return fmt.Errorf("插件 %s scheduled task %s: default_interval_seconds 必须是 interval_options 之一", pluginID, d.ID)
+		}
 	}
 	if d.TimeoutSeconds < 0 || d.MaxAttempts < 0 {
 		return fmt.Errorf("插件 %s scheduled task %s: timeout_seconds/max_attempts 不能为负数", pluginID, d.ID)
