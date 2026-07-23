@@ -453,6 +453,24 @@ func (s *hostServicesServer) SetSchedule(req ScheduleSetRequest, reply *JSONRepl
 	}, reply)
 }
 
+func (s *hostServicesServer) ListSiteAccounts(_ Empty, reply *JSONReply) error {
+	if s.siteAccounts == nil {
+		return fmt.Errorf("宿主未提供 SiteAccounts")
+	}
+	if err := s.requireHostPermission("site.accounts.read"); err != nil {
+		return err
+	}
+	result, err := s.siteAccounts.ListSiteAccounts(s.ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
 func (s *hostServicesServer) UpsertSiteAccount(req SiteAccountUpsertRequest, reply *JSONReply) error {
 	if s.siteAccounts == nil {
 		return fmt.Errorf("宿主未提供 SiteAccounts")
@@ -799,6 +817,15 @@ func (c *hostServicesClient) Query(ctx context.Context, statement string, args .
 		return nil, err
 	}
 	return decodeDBRows(reply.RowsJSON)
+}
+
+func (c *hostServicesClient) ListSiteAccounts(_ context.Context) ([]pluginsdk.SiteAccountInfo, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.ListSiteAccounts", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.SiteAccountInfo
+	return result, decodeJSON(reply.Data, &result)
 }
 
 func (c *hostServicesClient) UpsertSiteAccount(ctx context.Context, input pluginsdk.SiteAccountWrite) (pluginsdk.HostWriteResult, error) {

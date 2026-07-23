@@ -3,6 +3,8 @@ package pluginsdk
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
 
 // HostWriteResult is returned by typed host capability writes. TargetID is
@@ -38,10 +40,25 @@ type SiteAccountWrite struct {
 	Metadata       json.RawMessage `json:"metadata,omitempty"`
 }
 
+// SiteAccountInfo is a read-only snapshot of one host site account. Profile is
+// the latest user data synced by the host (nil when never synced); credentials
+// are never included.
+type SiteAccountInfo struct {
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	BaseURL         string                 `json:"base_url"`
+	Enabled         bool                   `json:"enabled"`
+	Profile         *providers.SiteProfile `json:"profile,omitempty"`
+	ProfileSyncedAt string                 `json:"profile_synced_at,omitempty"`
+}
+
 // SiteAccounts exposes stable site-account operations to plugins. It is a
 // domain capability, not a database facade.
 type SiteAccounts interface {
 	UpsertSiteAccount(ctx context.Context, input SiteAccountWrite) (HostWriteResult, error)
+	// ListSiteAccounts returns every site account with its latest synced
+	// profile. Requires host permission "site.accounts.read".
+	ListSiteAccounts(ctx context.Context) ([]SiteAccountInfo, error)
 }
 
 type EpisodeSelection struct {
