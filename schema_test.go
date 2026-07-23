@@ -75,6 +75,47 @@ func TestSchemaSelfValidation(t *testing.T) {
 	}
 }
 
+func TestSchemaGroupValidation(t *testing.T) {
+	ok := ConfigSchema{
+		Groups: []FieldGroup{{ID: "conn", Label: "连接"}, {ID: "advanced", Label: "高级", Collapsed: true}},
+		Fields: []Field{
+			{Name: "base_url", Type: "url", Label: "地址", Group: "conn", UI: &FieldUI{Width: "half"}},
+			{Name: "timeout", Type: "number", Label: "超时", Group: "advanced"},
+			{Name: "note", Type: "string", Label: "备注"},
+		},
+	}
+	if err := ok.validate("test"); err != nil {
+		t.Errorf("合法分组 schema 不应报错: %v", err)
+	}
+	parsed, err := ParseConfigSchema([]byte(`{
+		"groups": [{"id": "conn", "label": "连接", "collapsed": true}],
+		"fields": [{"name": "a", "type": "string", "label": "A", "group": "conn", "ui": {"width": "half"}}]
+	}`))
+	if err != nil || len(parsed.Groups) != 1 || !parsed.Groups[0].Collapsed ||
+		parsed.Fields[0].Group != "conn" || parsed.Fields[0].UI.Width != "half" {
+		t.Errorf("分组与布局字段应完整解析: %+v, %v", parsed, err)
+	}
+
+	unknownGroup := ConfigSchema{Fields: []Field{{Name: "a", Type: "string", Label: "A", Group: "missing"}}}
+	if err := unknownGroup.validate("test"); err == nil {
+		t.Error("引用未声明分组应报错")
+	}
+	dupGroup := ConfigSchema{
+		Groups: []FieldGroup{{ID: "g", Label: "G"}, {ID: "g", Label: "G2"}},
+	}
+	if err := dupGroup.validate("test"); err == nil {
+		t.Error("分组 id 重复应报错")
+	}
+	unnamedGroup := ConfigSchema{Groups: []FieldGroup{{ID: "g"}}}
+	if err := unnamedGroup.validate("test"); err == nil {
+		t.Error("分组缺 label 应报错")
+	}
+	badWidth := ConfigSchema{Fields: []Field{{Name: "a", Type: "string", Label: "A", UI: &FieldUI{Width: "third"}}}}
+	if err := badWidth.validate("test"); err == nil {
+		t.Error("非法 ui.width 应报错")
+	}
+}
+
 func TestParseManifestClassification(t *testing.T) {
 	manifest, err := ParseManifest([]byte(`
 id: drive115

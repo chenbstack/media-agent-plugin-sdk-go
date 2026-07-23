@@ -11,6 +11,19 @@ import (
 // 不用完整 JSON Schema：字段类型有限、前端一定能渲染、校验规则宿主完全可控。
 type ConfigSchema struct {
 	Fields []Field `json:"fields"`
+	// Groups 声明字段分组：字段用 Field.Group 引用组 ID，前端按声明顺序
+	// 渲染带标题的区块；未引用组的字段渲染在所有分组之前。分组只影响呈现，
+	// 不改变字段校验和存储。
+	Groups []FieldGroup `json:"groups,omitempty"`
+}
+
+// FieldGroup 是配置表单的一个呈现分组。
+type FieldGroup struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	// Collapsed 为 true 时该组默认折叠（适合高级/低频配置）。
+	Collapsed bool `json:"collapsed,omitempty"`
 }
 
 type Field struct {
@@ -30,7 +43,9 @@ type Field struct {
 	// 此时取值校验放宽为任意非空字符串，前端显示刷新按钮。
 	DynamicOptions bool            `json:"dynamic_options,omitempty"`
 	ShowWhen       *FieldCondition `json:"show_when,omitempty"`
-	UI             *FieldUI        `json:"ui,omitempty"`
+	// Group 引用 ConfigSchema.Groups 里某个组的 ID；空串表示不分组。
+	Group string   `json:"group,omitempty"`
+	UI    *FieldUI `json:"ui,omitempty"`
 }
 
 type FieldCondition struct {
@@ -43,6 +58,8 @@ type FieldUI struct {
 	Browse            string `json:"browse,omitempty"`
 	Gate              string `json:"gate,omitempty"`
 	HideAccessPreview bool   `json:"hide_access_preview,omitempty"`
+	// Width 控制字段在两列网格中的宽度："half"（半宽）或 "full"（整行，默认）。
+	Width string `json:"width,omitempty"`
 }
 
 type Option struct {
@@ -56,6 +73,16 @@ var fieldTypes = map[string]bool{
 }
 
 func (s ConfigSchema) validate(pluginID string) error {
+	groups := map[string]bool{}
+	for _, g := range s.Groups {
+		if g.ID == "" || g.Label == "" {
+			return fmt.Errorf("插件 %s: 字段分组必须有 id 和 label", pluginID)
+		}
+		if groups[g.ID] {
+			return fmt.Errorf("插件 %s: 字段分组 id 重复 %q", pluginID, g.ID)
+		}
+		groups[g.ID] = true
+	}
 	seen := map[string]bool{}
 	for _, f := range s.Fields {
 		if f.Name == "" || f.Label == "" {
@@ -73,6 +100,12 @@ func (s ConfigSchema) validate(pluginID string) error {
 		}
 		if f.Secret && f.Type != "password" && f.Type != "string" {
 			return fmt.Errorf("插件 %s: secret 字段 %s 只能是 password 或 string 类型", pluginID, f.Name)
+		}
+		if f.Group != "" && !groups[f.Group] {
+			return fmt.Errorf("插件 %s: 字段 %s 引用了未声明的分组 %q", pluginID, f.Name, f.Group)
+		}
+		if f.UI != nil && f.UI.Width != "" && f.UI.Width != "half" && f.UI.Width != "full" {
+			return fmt.Errorf("插件 %s: 字段 %s 的 ui.width 只能是 half 或 full", pluginID, f.Name)
 		}
 	}
 	return nil
