@@ -15,6 +15,7 @@ func TestPersistentClientAdaptersUseDispensedClient(t *testing.T) {
 	renderer := &recordingRenderer{}
 	events := &recordingEventSubscriber{}
 	actions := &recordingActionHandler{}
+	scheduledTasks := &recordingScheduledTaskHandler{}
 	plugin := pluginsdk.Plugin{
 		Manifest: pluginsdk.Manifest{ID: "official", Name: "Official Pack"},
 		NewCookieSource: func(context.Context, pluginsdk.Instance, pluginsdk.SecretResolver) (providers.CookieSourceProvider, error) {
@@ -28,6 +29,9 @@ func TestPersistentClientAdaptersUseDispensedClient(t *testing.T) {
 		},
 		NewActionHandler: func(context.Context, pluginsdk.Instance, pluginsdk.SecretResolver) (pluginsdk.ActionHandler, error) {
 			return actions, nil
+		},
+		NewScheduledTaskHandler: func(context.Context, pluginsdk.Instance, pluginsdk.SecretResolver) (pluginsdk.ScheduledTaskHandler, error) {
+			return scheduledTasks, nil
 		},
 	}
 	client := newProviderTestClient(t, plugin)
@@ -80,6 +84,15 @@ func TestPersistentClientAdaptersUseDispensedClient(t *testing.T) {
 	if actions.actionID != "approve" || !reflect.DeepEqual(actions.input, input) || actionResult.Message != "approved" {
 		t.Fatalf("action id=%q input=%#v result=%#v", actions.actionID, actions.input, actionResult)
 	}
+
+	scheduledRequest := pluginsdk.ScheduledTaskRequest{TaskID: "sync", Trigger: pluginsdk.ScheduledTaskTriggerSchedule, JobID: "job-1", Attempt: 2}
+	scheduledResult, err := client.ScheduledTaskHandler(inst, nil).RunScheduledTask(context.Background(), scheduledRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scheduledTasks.request, scheduledRequest) || scheduledResult.Message != "synced" {
+		t.Fatalf("scheduled request=%#v result=%#v", scheduledTasks.request, scheduledResult)
+	}
 }
 
 type recordingCookieSource struct{ tested bool }
@@ -124,4 +137,13 @@ func (h *recordingActionHandler) RunAction(_ context.Context, actionID string, i
 	h.actionID = actionID
 	h.input = input
 	return pluginsdk.ActionResult{Message: "approved", Data: map[string]any{"id": input["request_id"]}}, nil
+}
+
+type recordingScheduledTaskHandler struct {
+	request pluginsdk.ScheduledTaskRequest
+}
+
+func (h *recordingScheduledTaskHandler) RunScheduledTask(_ context.Context, request pluginsdk.ScheduledTaskRequest) (pluginsdk.ScheduledTaskResult, error) {
+	h.request = request
+	return pluginsdk.ScheduledTaskResult{Message: "synced", Data: map[string]any{"task_id": request.TaskID}}, nil
 }

@@ -218,6 +218,35 @@ func (s *rpcServer) RunAction(req ActionRunRequest, reply *JSONReply) error {
 	return nil
 }
 
+func (s *rpcServer) RunScheduledTask(req ScheduledTaskRunRequest, reply *JSONReply) error {
+	if s.plugin.NewScheduledTaskHandler == nil {
+		return fmt.Errorf("插件未实现 ScheduledTaskHandler")
+	}
+	inst, secrets, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	var request pluginsdk.ScheduledTaskRequest
+	if err := json.Unmarshal(req.RequestJSON, &request); err != nil {
+		return err
+	}
+	handler, err := s.plugin.NewScheduledTaskHandler(context.Background(), inst, secrets)
+	if err != nil {
+		return err
+	}
+	result, err := handler.RunScheduledTask(context.Background(), request)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) AssessOnboarding(req InstancePayload, reply *JSONReply) error {
 	if s.plugin.AssessOnboarding == nil {
 		return fmt.Errorf("插件未实现引导状态评估")

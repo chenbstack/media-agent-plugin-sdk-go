@@ -34,29 +34,30 @@ const (
 )
 
 type Manifest struct {
-	ID            string              `yaml:"id" json:"id"`
-	Name          string              `yaml:"name" json:"name"`
-	Version       string              `yaml:"version" json:"version"`
-	Description   string              `yaml:"description" json:"description,omitempty"`
-	Category      string              `yaml:"category,omitempty" json:"category,omitempty"`
-	Tags          []string            `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Type          string              `yaml:"type" json:"type"` // builtin / cli / rule / ui
-	Entry         map[string]string   `yaml:"entry,omitempty" json:"entry,omitempty"`
-	Protocol      string              `yaml:"protocol,omitempty" json:"protocol,omitempty"`
-	Transport     string              `yaml:"transport,omitempty" json:"transport,omitempty"`
-	ServeArgs     []string            `yaml:"serve_args,omitempty" json:"serve_args,omitempty"`
-	StdioArgs     []string            `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
-	Capabilities  []string            `yaml:"capabilities" json:"capabilities"`
-	Subscriptions []EventSubscription `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
-	API           *APIExtension       `yaml:"api,omitempty" json:"api,omitempty"`
-	UI            *UIExtension        `yaml:"ui,omitempty" json:"ui,omitempty"`
-	Identity      *IdentityExtension  `yaml:"identity,omitempty" json:"identity,omitempty"`
-	Onboarding    *OnboardingWorkflow `yaml:"onboarding,omitempty" json:"onboarding,omitempty"`
-	Entitlements  []string            `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
-	Actions       []ActionDefinition  `yaml:"actions,omitempty" json:"actions,omitempty"`
-	Permissions   Permissions         `yaml:"permissions" json:"permissions"`
-	Resources     Resources           `yaml:"resources" json:"resources"`
-	Install       *InstallInfo        `yaml:"install,omitempty" json:"install,omitempty"`
+	ID             string                    `yaml:"id" json:"id"`
+	Name           string                    `yaml:"name" json:"name"`
+	Version        string                    `yaml:"version" json:"version"`
+	Description    string                    `yaml:"description" json:"description,omitempty"`
+	Category       string                    `yaml:"category,omitempty" json:"category,omitempty"`
+	Tags           []string                  `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Type           string                    `yaml:"type" json:"type"` // builtin / cli / rule / ui
+	Entry          map[string]string         `yaml:"entry,omitempty" json:"entry,omitempty"`
+	Protocol       string                    `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+	Transport      string                    `yaml:"transport,omitempty" json:"transport,omitempty"`
+	ServeArgs      []string                  `yaml:"serve_args,omitempty" json:"serve_args,omitempty"`
+	StdioArgs      []string                  `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
+	Capabilities   []string                  `yaml:"capabilities" json:"capabilities"`
+	Subscriptions  []EventSubscription       `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
+	API            *APIExtension             `yaml:"api,omitempty" json:"api,omitempty"`
+	UI             *UIExtension              `yaml:"ui,omitempty" json:"ui,omitempty"`
+	Identity       *IdentityExtension        `yaml:"identity,omitempty" json:"identity,omitempty"`
+	Onboarding     *OnboardingWorkflow       `yaml:"onboarding,omitempty" json:"onboarding,omitempty"`
+	Entitlements   []string                  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
+	Actions        []ActionDefinition        `yaml:"actions,omitempty" json:"actions,omitempty"`
+	ScheduledTasks []ScheduledTaskDefinition `yaml:"scheduled_tasks,omitempty" json:"scheduled_tasks,omitempty"`
+	Permissions    Permissions               `yaml:"permissions" json:"permissions"`
+	Resources      Resources                 `yaml:"resources" json:"resources"`
+	Install        *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
 }
 
 // OnboardingWorkflow lets a plugin own the operation performed after the host
@@ -467,21 +468,22 @@ type Plugin struct {
 	IconSVG []byte
 
 	// 工厂按能力可选实现；nil 表示插件不提供该类 Provider。
-	NewStorage         func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
-	NewDownloader      func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
-	NewMediaServer     func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
-	NewMetadata        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
-	NewSite            func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
-	NewCookieSource    func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.CookieSourceProvider, error)
-	NewModel           func() providers.ModelProvider
-	NewEventSubscriber func(ctx context.Context, inst Instance, secrets SecretResolver) (EventSubscriber, error)
-	NewNotifier        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.NotifierProvider, error)
-	NewSubtitleSource  func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SubtitleSourceProvider, error)
-	NewRenderer        func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.RendererProvider, error)
-	NewAPI             func(ctx context.Context, inst Instance, secrets SecretResolver) (APIProvider, error)
-	NewIdentity        func(ctx context.Context, inst Instance, secrets SecretResolver) (IdentityProvider, error)
-	NewActionHandler   func(ctx context.Context, inst Instance, secrets SecretResolver) (ActionHandler, error)
-	AssessOnboarding   func(ctx context.Context, inst Instance, secrets SecretResolver) (OnboardingAssessment, error)
+	NewStorage              func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
+	NewDownloader           func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
+	NewMediaServer          func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
+	NewMetadata             func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
+	NewSite                 func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
+	NewCookieSource         func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.CookieSourceProvider, error)
+	NewModel                func() providers.ModelProvider
+	NewEventSubscriber      func(ctx context.Context, inst Instance, secrets SecretResolver) (EventSubscriber, error)
+	NewNotifier             func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.NotifierProvider, error)
+	NewSubtitleSource       func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SubtitleSourceProvider, error)
+	NewRenderer             func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.RendererProvider, error)
+	NewAPI                  func(ctx context.Context, inst Instance, secrets SecretResolver) (APIProvider, error)
+	NewIdentity             func(ctx context.Context, inst Instance, secrets SecretResolver) (IdentityProvider, error)
+	NewActionHandler        func(ctx context.Context, inst Instance, secrets SecretResolver) (ActionHandler, error)
+	NewScheduledTaskHandler func(ctx context.Context, inst Instance, secrets SecretResolver) (ScheduledTaskHandler, error)
+	AssessOnboarding        func(ctx context.Context, inst Instance, secrets SecretResolver) (OnboardingAssessment, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
 	// （如从媒体服务器拉取媒体库列表）；nil 表示插件没有动态选项字段。
@@ -616,6 +618,27 @@ func (p Plugin) Validate() error {
 			if err := validatePermissionSubset(m.Permissions, *action.Permissions); err != nil {
 				return fmt.Errorf("插件 %s action %s 权限声明无效: %w", m.ID, action.ID, err)
 			}
+		}
+	}
+	_, hasScheduledTaskCapability := capabilities[CapabilityScheduledTask]
+	if hasScheduledTaskCapability && len(m.ScheduledTasks) == 0 {
+		return fmt.Errorf("插件 %s: capability %s 必须声明 scheduled_tasks", m.ID, CapabilityScheduledTask)
+	}
+	if len(m.ScheduledTasks) > 0 && !hasScheduledTaskCapability {
+		return fmt.Errorf("插件 %s: 声明 scheduled_tasks 时必须包含 capability %s", m.ID, CapabilityScheduledTask)
+	}
+	declaredEntitlements, err := validateEntitlements(m.ID, "manifest", m.Entitlements, nil)
+	if err != nil {
+		return err
+	}
+	seenScheduledTasks := map[string]bool{}
+	for _, task := range m.ScheduledTasks {
+		if seenScheduledTasks[task.ID] {
+			return fmt.Errorf("插件 %s: scheduled task id 重复 %q", m.ID, task.ID)
+		}
+		seenScheduledTasks[task.ID] = true
+		if err := task.Validate(m.ID, m.Permissions, declaredEntitlements); err != nil {
+			return err
 		}
 	}
 	if m.Onboarding != nil {

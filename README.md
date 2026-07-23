@@ -6,7 +6,7 @@ The SDK is currently in the `v0.x` development phase. Pin a tagged version so
 host and plugin builds use the same contracts:
 
 ```bash
-go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.18.0
+go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.19.0
 ```
 
 ## Packages
@@ -62,6 +62,34 @@ flows additionally implement `IdentityRedirectProvider`; the host supplies the
 callback URL and one-time state, stores bounded opaque challenge data, maps the
 verified principal, and remains the sole issuer of its session cookie. CAS is
 not part of this contract.
+
+## Host-managed scheduled tasks
+
+Plugins declare periodic work with the `scheduled_task.run` capability and
+`manifest.scheduled_tasks`. The host persists each schedule, exposes its
+enable/interval controls, pauses it with the plugin lifecycle, and owns
+overlap prevention, retries, timeouts, and execution history. Plugins must not
+start background tickers.
+
+An executor can call a plugin-owned `ScheduledTaskHandler`:
+
+```yaml
+capabilities: [scheduled_task.run]
+scheduled_tasks:
+  - id: refresh
+    name: Refresh remote data
+    default_interval_seconds: 21600
+    min_interval_seconds: 900
+    timeout_seconds: 300
+    max_attempts: 3
+    overlap_policy: skip
+    executor:
+      kind: plugin_handler
+```
+
+Plugins may instead select a host-registered workflow with
+`executor.kind: host_workflow`. Workflow names are allowlisted by the host;
+declaring one does not grant direct host-data access.
 
 ## Domain migration capabilities
 

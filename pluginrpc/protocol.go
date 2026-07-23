@@ -186,6 +186,11 @@ type ActionRunRequest struct {
 	InputJSON []byte
 }
 
+type ScheduledTaskRunRequest struct {
+	Instance    InstancePayload
+	RequestJSON []byte
+}
+
 type StoragePathRequest struct {
 	Instance InstancePayload
 	Path     string
@@ -1002,6 +1007,11 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 			return &actionHandler{external: e, inst: inst, secrets: secrets}, nil
 		}
 	}
+	if out.HasExactCapability(pluginsdk.CapabilityScheduledTask) && hasPluginHandlerScheduledTask(out.Manifest.ScheduledTasks) {
+		out.NewScheduledTaskHandler = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.ScheduledTaskHandler, error) {
+			return &scheduledTaskHandler{external: e, inst: inst, secrets: secrets}, nil
+		}
+	}
 	if out.HasExactCapability(pluginsdk.CapabilityOnboardingAssessment) {
 		out.AssessOnboarding = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.OnboardingAssessment, error) {
 			var result pluginsdk.OnboardingAssessment
@@ -1037,6 +1047,15 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 		}
 	}
 	return out
+}
+
+func hasPluginHandlerScheduledTask(tasks []pluginsdk.ScheduledTaskDefinition) bool {
+	for _, task := range tasks {
+		if task.Executor.Kind == pluginsdk.ScheduledTaskExecutorPluginHandler {
+			return true
+		}
+	}
+	return false
 }
 
 // installForwarders 构造某个组件的安装/检查/卸载 RPC 转发闭包，component 透传给插件进程。

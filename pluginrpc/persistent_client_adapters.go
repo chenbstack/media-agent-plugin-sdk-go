@@ -29,6 +29,11 @@ func (c *Client) ActionHandler(inst pluginsdk.Instance, secrets pluginsdk.Secret
 	return &persistentActionHandler{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
 }
 
+// ScheduledTaskHandler returns a handler bound to this logical Client.
+func (c *Client) ScheduledTaskHandler(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) pluginsdk.ScheduledTaskHandler {
+	return &persistentScheduledTaskHandler{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
+}
+
 type persistentCookieSourceProvider struct {
 	session providerSession
 	inst    pluginsdk.Instance
@@ -108,6 +113,24 @@ func (h *persistentActionHandler) RunAction(ctx context.Context, actionID string
 	err := h.session.withClient(ctx, "plugin.action."+actionID, func(c *Client) error {
 		var err error
 		result, err = c.RunActionContext(ctx, h.inst, h.secrets, actionID, input)
+		return err
+	})
+	return result, err
+}
+
+type persistentScheduledTaskHandler struct {
+	session providerSession
+	inst    pluginsdk.Instance
+	secrets pluginsdk.SecretResolver
+}
+
+var _ pluginsdk.ScheduledTaskHandler = (*persistentScheduledTaskHandler)(nil)
+
+func (h *persistentScheduledTaskHandler) RunScheduledTask(ctx context.Context, request pluginsdk.ScheduledTaskRequest) (pluginsdk.ScheduledTaskResult, error) {
+	var result pluginsdk.ScheduledTaskResult
+	err := h.session.withClient(ctx, "plugin.scheduled_task."+request.TaskID, func(c *Client) error {
+		var err error
+		result, err = c.RunScheduledTaskContext(ctx, h.inst, h.secrets, request)
 		return err
 	})
 	return result, err

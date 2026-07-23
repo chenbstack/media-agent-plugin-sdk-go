@@ -173,6 +173,26 @@ func (c *Client) RunActionContext(ctx context.Context, inst pluginsdk.Instance, 
 	return result, nil
 }
 
+func (c *Client) RunScheduledTaskContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, request pluginsdk.ScheduledTaskRequest) (pluginsdk.ScheduledTaskResult, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.ScheduledTaskResult{}, err
+	}
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return pluginsdk.ScheduledTaskResult{}, err
+	}
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.RunScheduledTask", ScheduledTaskRunRequest{Instance: payload, RequestJSON: requestJSON}, &reply); err != nil {
+		return pluginsdk.ScheduledTaskResult{}, err
+	}
+	var result pluginsdk.ScheduledTaskResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.ScheduledTaskResult{}, err
+	}
+	return result, nil
+}
+
 func (c *Client) AssessOnboardingContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.OnboardingAssessment, error) {
 	payload, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
@@ -335,12 +355,33 @@ type actionHandler struct {
 	secrets  pluginsdk.SecretResolver
 }
 
+type scheduledTaskHandler struct {
+	external ExternalPlugin
+	inst     pluginsdk.Instance
+	secrets  pluginsdk.SecretResolver
+}
+
 func (h *actionHandler) RunAction(ctx context.Context, actionID string, input map[string]any) (pluginsdk.ActionResult, error) {
 	var result pluginsdk.ActionResult
 	callCtx, cancel := contextWithTimeout(ctx, externalPluginActionTimeout)
 	defer cancel()
 	err := h.external.withClientOperation(callCtx, "plugin.action."+actionID, func(c *Client) error {
 		got, err := c.RunActionContext(callCtx, h.inst, h.secrets, actionID, input)
+		if err != nil {
+			return err
+		}
+		result = got
+		return nil
+	})
+	return result, err
+}
+
+func (h *scheduledTaskHandler) RunScheduledTask(ctx context.Context, request pluginsdk.ScheduledTaskRequest) (pluginsdk.ScheduledTaskResult, error) {
+	var result pluginsdk.ScheduledTaskResult
+	callCtx, cancel := contextWithTimeout(ctx, externalPluginActionTimeout)
+	defer cancel()
+	err := h.external.withClientOperation(callCtx, "plugin.scheduled_task."+request.TaskID, func(c *Client) error {
+		got, err := c.RunScheduledTaskContext(callCtx, h.inst, h.secrets, request)
 		if err != nil {
 			return err
 		}

@@ -3,6 +3,8 @@ package pluginsdk
 import (
 	"errors"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 var testSchema = ConfigSchema{Fields: []Field{
@@ -99,6 +101,73 @@ func TestManifestRejectsDuplicateActions(t *testing.T) {
 	}}
 	if err := p.validate(); err == nil {
 		t.Fatal("expected duplicate action validation error")
+	}
+}
+
+func TestManifestScheduledTasks(t *testing.T) {
+	permissions := Permissions{Network: []string{"configured:server_url"}, Host: []string{"site.credentials.apply"}}
+	p := Plugin{Manifest: Manifest{
+		ID: "automation", Name: "Automation", Version: "1", Type: "builtin",
+		Capabilities: []string{CapabilityScheduledTask},
+		Entitlements: []string{"automation.enabled"},
+		Permissions:  permissions,
+		ScheduledTasks: []ScheduledTaskDefinition{{
+			ID: "sync", Name: "同步", DefaultEnabled: false,
+			DefaultIntervalSeconds: 3600, MinIntervalSeconds: 60, MaxIntervalSeconds: 86400,
+			TimeoutSeconds: 300, MaxAttempts: 3, OverlapPolicy: ScheduledTaskOverlapSkip,
+			Executor:             ScheduledTaskExecutor{Kind: ScheduledTaskExecutorPluginHandler},
+			Permissions:          &Permissions{Network: []string{"configured:server_url"}},
+			RequiredEntitlements: []string{"automation.enabled"},
+		}},
+	}}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	data, err := yaml.Marshal(p.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseManifest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.ScheduledTasks) != 1 || parsed.ScheduledTasks[0].Executor.Kind != ScheduledTaskExecutorPluginHandler {
+		t.Fatalf("scheduled tasks = %#v", parsed.ScheduledTasks)
+	}
+}
+
+func TestManifestRejectsInvalidScheduledTasks(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest Manifest
+	}{
+		{
+			name: "missing capability",
+			manifest: Manifest{ID: "x", Name: "X", Version: "1", Type: "builtin", Capabilities: []string{"action.run"},
+				ScheduledTasks: []ScheduledTaskDefinition{{ID: "sync", Name: "Sync", DefaultIntervalSeconds: 60, Executor: ScheduledTaskExecutor{Kind: ScheduledTaskExecutorPluginHandler}}}},
+		},
+		{
+			name: "invalid interval",
+			manifest: Manifest{ID: "x", Name: "X", Version: "1", Type: "builtin", Capabilities: []string{CapabilityScheduledTask},
+				ScheduledTasks: []ScheduledTaskDefinition{{ID: "sync", Name: "Sync", DefaultIntervalSeconds: 30, MinIntervalSeconds: 60, Executor: ScheduledTaskExecutor{Kind: ScheduledTaskExecutorPluginHandler}}}},
+		},
+		{
+			name: "host workflow missing id",
+			manifest: Manifest{ID: "x", Name: "X", Version: "1", Type: "builtin", Capabilities: []string{CapabilityScheduledTask},
+				ScheduledTasks: []ScheduledTaskDefinition{{ID: "sync", Name: "Sync", DefaultIntervalSeconds: 60, Executor: ScheduledTaskExecutor{Kind: ScheduledTaskExecutorHostWorkflow}}}},
+		},
+		{
+			name: "permission escapes parent",
+			manifest: Manifest{ID: "x", Name: "X", Version: "1", Type: "builtin", Capabilities: []string{CapabilityScheduledTask},
+				ScheduledTasks: []ScheduledTaskDefinition{{ID: "sync", Name: "Sync", DefaultIntervalSeconds: 60, Executor: ScheduledTaskExecutor{Kind: ScheduledTaskExecutorPluginHandler}, Permissions: &Permissions{Host: []string{"site.credentials.apply"}}}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := (Plugin{Manifest: test.manifest}).Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
 	}
 }
 
