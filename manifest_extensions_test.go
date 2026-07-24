@@ -20,6 +20,10 @@ capabilities:
 api:
   service: app
   auth: session
+  plugin_services:
+    - name: requests.count
+      method: GET
+      path: /requests/count
   required_entitlements:
     - collaboration.requests.enabled
 ui:
@@ -78,6 +82,10 @@ resources:
 	}
 	if manifest.API == nil || manifest.API.Service != "app" {
 		t.Fatalf("api = %#v", manifest.API)
+	}
+	if len(manifest.API.PluginServices) != 1 || manifest.API.PluginServices[0].Name != "requests.count" ||
+		manifest.API.PluginServices[0].Method != "GET" || manifest.API.PluginServices[0].Path != "/requests/count" {
+		t.Fatalf("api plugin_services = %#v", manifest.API.PluginServices)
 	}
 	if manifest.UI == nil || len(manifest.UI.Routes) != 1 || len(manifest.UI.Actions) != 1 || manifest.UI.Routes[0].Menu == nil {
 		t.Fatalf("ui = %#v", manifest.UI)
@@ -163,6 +171,15 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "card preview export invalid", edit: func(m *Manifest) {
 			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", PreviewExport: "bad name"}}
 		}, want: "preview_export"},
+		{name: "plugin_services bad name", edit: func(m *Manifest) {
+			m.API.PluginServices = []PluginServiceExport{{Name: "bad name", Method: "GET", Path: "/x"}}
+		}, want: "能力名"},
+		{name: "plugin_services bad method", edit: func(m *Manifest) {
+			m.API.PluginServices = []PluginServiceExport{{Name: "op", Method: "TRACE", Path: "/x"}}
+		}, want: "method"},
+		{name: "plugin_services bad path", edit: func(m *Manifest) {
+			m.API.PluginServices = []PluginServiceExport{{Name: "op", Method: "GET", Path: "x"}}
+		}, want: "path"},
 	}
 
 	for _, tt := range tests {

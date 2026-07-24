@@ -34,6 +34,7 @@ type hostServicesServer struct {
 	storages          pluginsdk.Storages
 	schedules         pluginsdk.Schedules
 	settings          pluginsdk.Settings
+	pluginServices    pluginsdk.PluginServices
 }
 
 type RevealRequest struct {
@@ -471,6 +472,36 @@ func (s *hostServicesServer) ListSiteAccounts(_ Empty, reply *JSONReply) error {
 	return err
 }
 
+type PluginServiceCallRequest struct {
+	Call pluginsdk.PluginServiceCall
+}
+
+func (s *hostServicesServer) CallPluginService(req PluginServiceCallRequest, reply *JSONReply) error {
+	if s.pluginServices == nil {
+		return fmt.Errorf("宿主未提供 PluginServices")
+	}
+	provider := strings.TrimSpace(req.Call.Provider)
+	capability := strings.TrimSpace(req.Call.Capability)
+	if provider == "" || capability == "" {
+		return fmt.Errorf("plugin_service 调用缺少 provider/capability")
+	}
+	// 调用方需按能力粒度声明并被授予 host 权限
+	// plugin_service.<provider>/<capability>；提供方是否开放该能力与实际路由由
+	// 宿主实现在 CallPluginService 内部完成。
+	if err := s.requireHostPermission("plugin_service." + provider + "/" + capability); err != nil {
+		return err
+	}
+	result, err := s.pluginServices.CallPluginService(s.ctx, req.Call)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
 func (s *hostServicesServer) UpsertSiteAccount(req SiteAccountUpsertRequest, reply *JSONReply) error {
 	if s.siteAccounts == nil {
 		return fmt.Errorf("宿主未提供 SiteAccounts")
@@ -817,6 +848,15 @@ func (c *hostServicesClient) Query(ctx context.Context, statement string, args .
 		return nil, err
 	}
 	return decodeDBRows(reply.RowsJSON)
+}
+
+func (c *hostServicesClient) CallPluginService(_ context.Context, call pluginsdk.PluginServiceCall) (pluginsdk.PluginServiceResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.CallPluginService", PluginServiceCallRequest{Call: call}, &reply); err != nil {
+		return pluginsdk.PluginServiceResult{}, err
+	}
+	var result pluginsdk.PluginServiceResult
+	return result, decodeJSON(reply.Data, &result)
 }
 
 func (c *hostServicesClient) ListSiteAccounts(_ context.Context) ([]pluginsdk.SiteAccountInfo, error) {

@@ -77,6 +77,20 @@ type APIExtension struct {
 	Service              string      `yaml:"service" json:"service"`
 	Auth                 APIAuthMode `yaml:"auth,omitempty" json:"auth,omitempty"`
 	RequiredEntitlements []string    `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	// PluginServices 逐个列出本服务对外开放给其他插件调用的能力。提供方按能力
+	// 粒度声明（不点名调用方）；每个能力对应独立权限键
+	// plugin_service.<provider>/<name>，由调用方声明、用户逐项授权。未列出的
+	// 能力不对插件开放，只接受前端 session 调用。
+	PluginServices []PluginServiceExport `yaml:"plugin_services,omitempty" json:"plugin_services,omitempty"`
+}
+
+// PluginServiceExport 声明一个对插件开放的能力：Name 是能力标识（权限键与调用
+// 方按它引用），Method/Path 是宿主转发时映射到的 api.endpoint 内部路由。调用方
+// 只按 Name 调用，无法自行拼构 Method/Path。
+type PluginServiceExport struct {
+	Name   string `yaml:"name" json:"name"`
+	Method string `yaml:"method" json:"method"`
+	Path   string `yaml:"path" json:"path"`
 }
 
 type APIAuthMode string
@@ -446,7 +460,10 @@ type Instance struct {
 	Connections   Connections
 	Storages      Storages
 	Schedules     Schedules
-	Runtime       *runtimesdk.Services
+	// PluginServices 经宿主 broker 调用其他插件的业务 API；只在插件声明了
+	// host 权限 "plugin_service.<provider>/<service>" 时由宿主注入。
+	PluginServices PluginServices
+	Runtime        *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。
@@ -738,6 +755,24 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 		}
 		if _, err := validateEntitlements(m.ID, "api", m.API.RequiredEntitlements, declaredEntitlements); err != nil {
 			return err
+		}
+		seenExports := map[string]struct{}{}
+		for _, export := range m.API.PluginServices {
+			if !manifestIdentifier.MatchString(export.Name) {
+				return fmt.Errorf("插件 %s: api.plugin_services 能力名 %q 格式无效", m.ID, export.Name)
+			}
+			if _, dup := seenExports[export.Name]; dup {
+				return fmt.Errorf("插件 %s: api.plugin_services 能力名重复 %q", m.ID, export.Name)
+			}
+			seenExports[export.Name] = struct{}{}
+			switch export.Method {
+			case "GET", "POST", "PUT", "PATCH", "DELETE":
+			default:
+				return fmt.Errorf("插件 %s: api.plugin_services 能力 %q 的 method %q 无效", m.ID, export.Name, export.Method)
+			}
+			if !strings.HasPrefix(export.Path, "/") {
+				return fmt.Errorf("插件 %s: api.plugin_services 能力 %q 的 path 必须以 / 开头", m.ID, export.Name)
+			}
 		}
 	}
 

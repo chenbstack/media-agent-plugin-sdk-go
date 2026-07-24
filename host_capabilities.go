@@ -61,6 +61,34 @@ type SiteAccounts interface {
 	ListSiteAccounts(ctx context.Context) ([]SiteAccountInfo, error)
 }
 
+// PluginServiceCall 是一次跨插件服务调用：经宿主 broker 转发到目标插件
+// （Provider）在 api.plugin_services 里逐个开放的某个能力（Capability）。调用方
+// 只按能力名引用，Method/Path 由宿主按提供方声明解析，调用方无法自行拼构。
+// 提供方需在 api.plugin_services 列出该能力，调用方需声明 host 权限
+// "plugin_service.<provider>/<capability>" 并经用户授权，两侧任一缺失宿主都会
+// 拒绝转发。Body 必须是 JSON（或为空）；提供方看到的 Principal 为
+// {ID: "plugin:<caller>", Issuer: "plugin"}。
+type PluginServiceCall struct {
+	Provider   string              `json:"provider"`
+	Capability string              `json:"capability"`
+	Query      map[string][]string `json:"query,omitempty"`
+	Body       []byte              `json:"body,omitempty"`
+}
+
+// PluginServiceResult 是跨插件服务调用的响应。宿主已按 api.endpoint 的响应
+// 约束校验过：Status 非重定向、Body 为 JSON 且在尺寸上限内。
+type PluginServiceResult struct {
+	Status int    `json:"status"`
+	Body   []byte `json:"body,omitempty"`
+}
+
+// PluginServices 让插件经宿主 broker 调用其他插件提供的业务 API。宿主负责
+// 双侧授权（调用方 host 权限 + 提供方 opt-in）、请求/响应尺寸与 JSON 约束、
+// 请求头清洗和超时；插件之间不建立直接连接。
+type PluginServices interface {
+	CallPluginService(ctx context.Context, call PluginServiceCall) (PluginServiceResult, error)
+}
+
 type EpisodeSelection struct {
 	Season  int `json:"season"`
 	Episode int `json:"episode"`
