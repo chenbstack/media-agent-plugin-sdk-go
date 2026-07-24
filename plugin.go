@@ -110,12 +110,17 @@ type UIExtension struct {
 // 负责卡片体；HeaderExport 可选，声明渲染在标题行右侧的自定义组件（如图例、
 // 角标）。Title 为空则保持完全自定义模式，卡片内容（含标题）全部由 Export
 // 组件渲染，此时不允许声明 HeaderExport。
+//
+// PreviewExport 可选，声明卡片在总览自定义面板缩略图里的静态预览组件：
+// 用写死的示例数据渲染一张正常尺寸的卡片，由宿主等比缩小展示。预览组件
+// 必须纯静态——不得调用宿主 API 或发起任何请求。未声明时宿主用通用骨架示意。
 type UICard struct {
 	ID                   string   `yaml:"id" json:"id"`
 	Size                 string   `yaml:"size" json:"size"`
 	Export               string   `yaml:"export" json:"export"`
 	Title                string   `yaml:"title,omitempty" json:"title,omitempty"`
 	HeaderExport         string   `yaml:"header_export,omitempty" json:"header_export,omitempty"`
+	PreviewExport        string   `yaml:"preview_export,omitempty" json:"preview_export,omitempty"`
 	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
 	RequiredPermissions  []string `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
 	ForbiddenPermissions []string `yaml:"forbidden_permissions,omitempty" json:"forbidden_permissions,omitempty"`
@@ -837,6 +842,9 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 				if !manifestIdentifier.MatchString(card.HeaderExport) {
 					return fmt.Errorf("插件 %s: ui card %s 的 header_export %q 格式无效", m.ID, card.ID, card.HeaderExport)
 				}
+			}
+			if card.PreviewExport != "" && !manifestIdentifier.MatchString(card.PreviewExport) {
+				return fmt.Errorf("插件 %s: ui card %s 的 preview_export %q 格式无效", m.ID, card.ID, card.PreviewExport)
 			}
 			if _, err := validateEntitlements(m.ID, "ui card "+card.ID, card.RequiredEntitlements, declaredEntitlements); err != nil {
 				return err

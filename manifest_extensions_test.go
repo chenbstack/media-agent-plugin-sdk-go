@@ -49,6 +49,7 @@ ui:
       export: OverviewCard
       title: 家庭总览
       header_export: OverviewCardHeader
+      preview_export: OverviewCardPreview
 identity:
   service: family
   flows:
@@ -83,6 +84,9 @@ resources:
 	}
 	if len(manifest.UI.Cards) != 1 || manifest.UI.Cards[0].Title != "家庭总览" || manifest.UI.Cards[0].HeaderExport != "OverviewCardHeader" {
 		t.Fatalf("cards = %#v", manifest.UI.Cards)
+	}
+	if manifest.UI.Cards[0].PreviewExport != "OverviewCardPreview" {
+		t.Fatalf("cards preview_export = %#v", manifest.UI.Cards)
 	}
 	if manifest.Identity == nil || manifest.Identity.Service != "family" || len(manifest.Identity.Flows) != 2 {
 		t.Fatalf("identity = %#v", manifest.Identity)
@@ -156,6 +160,9 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "card header export invalid", edit: func(m *Manifest) {
 			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Title: "家庭卡片", HeaderExport: "bad name"}}
 		}, want: "header_export"},
+		{name: "card preview export invalid", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", PreviewExport: "bad name"}}
+		}, want: "preview_export"},
 	}
 
 	for _, tt := range tests {
