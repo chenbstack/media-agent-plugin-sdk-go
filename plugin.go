@@ -128,17 +128,46 @@ type UIExtension struct {
 // PreviewExport 可选，声明卡片在总览自定义面板缩略图里的静态预览组件：
 // 用写死的示例数据渲染一张正常尺寸的卡片，由宿主等比缩小展示。预览组件
 // 必须纯静态——不得调用宿主 API 或发起任何请求。未声明时宿主用通用骨架示意。
+//
+// Data 可选，声明卡片数据改由宿主代取（见 UICardData）。不声明则维持原样：
+// 卡片组件自己调宿主 API 取数。
 type UICard struct {
-	ID                   string   `yaml:"id" json:"id"`
-	Size                 string   `yaml:"size" json:"size"`
-	Export               string   `yaml:"export" json:"export"`
-	Title                string   `yaml:"title,omitempty" json:"title,omitempty"`
-	HeaderExport         string   `yaml:"header_export,omitempty" json:"header_export,omitempty"`
-	PreviewExport        string   `yaml:"preview_export,omitempty" json:"preview_export,omitempty"`
-	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
-	RequiredPermissions  []string `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
-	ForbiddenPermissions []string `yaml:"forbidden_permissions,omitempty" json:"forbidden_permissions,omitempty"`
+	ID                   string      `yaml:"id" json:"id"`
+	Size                 string      `yaml:"size" json:"size"`
+	Export               string      `yaml:"export" json:"export"`
+	Title                string      `yaml:"title,omitempty" json:"title,omitempty"`
+	HeaderExport         string      `yaml:"header_export,omitempty" json:"header_export,omitempty"`
+	PreviewExport        string      `yaml:"preview_export,omitempty" json:"preview_export,omitempty"`
+	Data                 *UICardData `yaml:"data,omitempty" json:"data,omitempty"`
+	RequiredEntitlements []string    `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	RequiredPermissions  []string    `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
+	ForbiddenPermissions []string    `yaml:"forbidden_permissions,omitempty" json:"forbidden_permissions,omitempty"`
 }
+
+// UICardData 把卡片取数的活交给宿主：宿主按 RefreshInterval 周期性调用 Sources
+// 里的插件服务端点，把结果随总览事件流一并下发，卡片组件直接读现成数据，自己
+// 不再发请求。一屏十来张卡各自轮询会把总览页打成筛子，交给宿主才能合并调度。
+//
+// 宿主只取真正要显示的卡片：用户在总览里隐藏掉的卡、以及被停用插件的卡，一次
+// 都不会取。声明这一段的前提是插件有 api.endpoint capability——数据总得有地方取。
+type UICardData struct {
+	// RefreshInterval 形如 "30s"、"5m"、"1h"，是这张卡期望的取数间隔。留空由
+	// 宿主取默认值。宿主还会按自己的下限收敛，声明得再短也不会真按秒去打插件。
+	RefreshInterval string `yaml:"refresh_interval,omitempty" json:"refresh_interval,omitempty"`
+	// Sources 至少一路。一张卡往往要拼几个端点才够画，所以这里是列表而不是单值。
+	Sources []UICardSource `yaml:"sources" json:"sources"`
+}
+
+// UICardSource 是卡片数据的一路来源。Key 是卡片组件读取这一路数据时用的名字，
+// 在同一张卡内唯一；Path 是插件自己 api.endpoint 下的绝对路径，可带查询串。
+type UICardSource struct {
+	Key  string `yaml:"key" json:"key"`
+	Path string `yaml:"path" json:"path"`
+}
+
+// UICardRefreshIntervalMax 是 refresh_interval 的声明上限。比一天还长的间隔说明
+// 这数据压根不该走周期取数，用事件推更合适。
+const UICardRefreshIntervalMax = 24 * time.Hour
 
 // UITab 声明插件详情弹窗的自定义 tab：与宿主内置的设置/能力/权限同级，按声明
 // 顺序排在内置 tab 之前，第一个自定义 tab 是打开弹窗时的默认 tab。
@@ -733,6 +762,62 @@ func (p Plugin) validate() error { return p.Validate() }
 
 var manifestIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
+// validateCardData 校验卡片的宿主代取声明。宿主拿着这段声明去打插件自己的
+// api.endpoint，所以路径必须是能直接拼进去的绝对路径——留给宿主去猜就晚了。
+func validateCardData(pluginID string, card UICard, hasAPI bool) error {
+	if card.Data == nil {
+		return nil
+	}
+	label := "ui card " + card.ID
+	if !hasAPI {
+		return fmt.Errorf("插件 %s: %s 声明了 data 但没有 capability api.endpoint（宿主无处取数）", pluginID, label)
+	}
+	if len(card.Data.Sources) == 0 {
+		return fmt.Errorf("插件 %s: %s 的 data 必须声明至少一路 sources", pluginID, label)
+	}
+	if raw := strings.TrimSpace(card.Data.RefreshInterval); raw != "" {
+		interval, err := time.ParseDuration(raw)
+		if err != nil {
+			return fmt.Errorf("插件 %s: %s 的 refresh_interval %q 格式无效", pluginID, label, card.Data.RefreshInterval)
+		}
+		if interval <= 0 {
+			return fmt.Errorf("插件 %s: %s 的 refresh_interval 必须为正数", pluginID, label)
+		}
+		if interval > UICardRefreshIntervalMax {
+			return fmt.Errorf("插件 %s: %s 的 refresh_interval 不能超过 %s", pluginID, label, UICardRefreshIntervalMax)
+		}
+	}
+	keys := make(map[string]struct{}, len(card.Data.Sources))
+	for _, source := range card.Data.Sources {
+		if !manifestIdentifier.MatchString(source.Key) {
+			return fmt.Errorf("插件 %s: %s 的 data source key %q 格式无效", pluginID, label, source.Key)
+		}
+		if _, exists := keys[source.Key]; exists {
+			return fmt.Errorf("插件 %s: %s 的 data source key 重复 %q", pluginID, label, source.Key)
+		}
+		keys[source.Key] = struct{}{}
+		if err := validateCardSourcePath(pluginID, label, source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateCardSourcePath 卡住的是宿主拼接时会出事的形状：非绝对路径、协议相对
+// 的 "//host"、以及能翻出插件命名空间的 ".." 段。查询串允许，锚点没有意义。
+func validateCardSourcePath(pluginID, label string, source UICardSource) error {
+	path := source.Path
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.Contains(path, "#") || strings.Contains(path, "\\") {
+		return fmt.Errorf("插件 %s: %s 的 data source %s 路径 %q 必须是插件命名空间内的绝对路径", pluginID, label, source.Key, path)
+	}
+	for _, segment := range strings.Split(strings.SplitN(path, "?", 2)[0], "/") {
+		if segment == ".." {
+			return fmt.Errorf("插件 %s: %s 的 data source %s 路径 %q 不能包含 .. 段", pluginID, label, source.Key, path)
+		}
+	}
+	return nil
+}
+
 func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 	declaredEntitlements, err := validateEntitlements(m.ID, "manifest", m.Entitlements, nil)
 	if err != nil {
@@ -880,6 +965,9 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 			}
 			if card.PreviewExport != "" && !manifestIdentifier.MatchString(card.PreviewExport) {
 				return fmt.Errorf("插件 %s: ui card %s 的 preview_export %q 格式无效", m.ID, card.ID, card.PreviewExport)
+			}
+			if err := validateCardData(m.ID, card, hasAPI); err != nil {
+				return err
 			}
 			if _, err := validateEntitlements(m.ID, "ui card "+card.ID, card.RequiredEntitlements, declaredEntitlements); err != nil {
 				return err

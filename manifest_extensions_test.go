@@ -54,6 +54,13 @@ ui:
       title: 家庭总览
       header_export: OverviewCardHeader
       preview_export: OverviewCardPreview
+      data:
+        refresh_interval: 5m
+        sources:
+          - key: summary
+            path: /summary
+          - key: trend
+            path: "/trend?days=30"
 identity:
   service: family
   flows:
@@ -95,6 +102,15 @@ resources:
 	}
 	if manifest.UI.Cards[0].PreviewExport != "OverviewCardPreview" {
 		t.Fatalf("cards preview_export = %#v", manifest.UI.Cards)
+	}
+	// 宿主代取声明：多路 sources 必须按声明顺序原样保留，带查询串的路径不能被截断。
+	cardData := manifest.UI.Cards[0].Data
+	if cardData == nil || cardData.RefreshInterval != "5m" || len(cardData.Sources) != 2 {
+		t.Fatalf("cards data = %#v", cardData)
+	}
+	if cardData.Sources[0] != (UICardSource{Key: "summary", Path: "/summary"}) ||
+		cardData.Sources[1] != (UICardSource{Key: "trend", Path: "/trend?days=30"}) {
+		t.Fatalf("cards data sources = %#v", cardData.Sources)
 	}
 	if manifest.Identity == nil || manifest.Identity.Service != "family" || len(manifest.Identity.Flows) != 2 {
 		t.Fatalf("identity = %#v", manifest.Identity)
@@ -171,6 +187,39 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "card preview export invalid", edit: func(m *Manifest) {
 			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", PreviewExport: "bad name"}}
 		}, want: "preview_export"},
+		{name: "card data without api capability", edit: func(m *Manifest) {
+			m.Capabilities = []string{"ui.module"}
+			m.API = nil
+			m.UI.Actions = nil
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{Sources: []UICardSource{{Key: "summary", Path: "/summary"}}}}}
+		}, want: "没有 capability api.endpoint"},
+		{name: "card data without sources", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{RefreshInterval: "5m"}}}
+		}, want: "至少一路 sources"},
+		{name: "card data bad interval", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{RefreshInterval: "5 minutes", Sources: []UICardSource{{Key: "a", Path: "/a"}}}}}
+		}, want: "refresh_interval"},
+		{name: "card data negative interval", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{RefreshInterval: "-1m", Sources: []UICardSource{{Key: "a", Path: "/a"}}}}}
+		}, want: "必须为正数"},
+		{name: "card data interval too long", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{RefreshInterval: "48h", Sources: []UICardSource{{Key: "a", Path: "/a"}}}}}
+		}, want: "不能超过"},
+		{name: "card data duplicate source key", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{Sources: []UICardSource{{Key: "a", Path: "/a"}, {Key: "a", Path: "/b"}}}}}
+		}, want: "source key 重复"},
+		{name: "card data bad source key", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{Sources: []UICardSource{{Key: "bad key", Path: "/a"}}}}}
+		}, want: "source key"},
+		{name: "card data relative source path", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{Sources: []UICardSource{{Key: "a", Path: "summary"}}}}}
+		}, want: "绝对路径"},
+		{name: "card data protocol relative source path", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{Sources: []UICardSource{{Key: "a", Path: "//evil.test/x"}}}}}
+		}, want: "绝对路径"},
+		{name: "card data traversal source path", edit: func(m *Manifest) {
+			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{Sources: []UICardSource{{Key: "a", Path: "/../other/x"}}}}}
+		}, want: ".. 段"},
 		{name: "plugin_services bad name", edit: func(m *Manifest) {
 			m.API.PluginServices = []PluginServiceExport{{Name: "bad name", Method: "GET", Path: "/x"}}
 		}, want: "能力名"},
