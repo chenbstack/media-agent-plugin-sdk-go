@@ -46,6 +46,15 @@ type Field struct {
 	// 此时取值校验放宽为任意非空字符串，前端显示刷新按钮。
 	DynamicOptions bool            `json:"dynamic_options,omitempty"`
 	ShowWhen       *FieldCondition `json:"show_when,omitempty"`
+	// Retired 声明一个已经撤掉的字段：不渲染、不校验取值、也不进归一化后的配置。
+	//
+	// 撤掉一个配置项时，已装实例的配置里还留着它，而 Validate 遇到 schema 没声明的
+	// 键会判「未声明的字段」——用户一打开设置页就是一片红，连保存都保存不了。声明成
+	// Retired 就只是让它安静通过，用户下次保存配置时这个键自然消失。
+	//
+	// 一般配合 Plugin.ConfigSchemaForConfig 用：只在配置里确实还有这个键时才追加，
+	// 免得新装的实例也背着一堆历史包袱。
+	Retired bool `json:"retired,omitempty"`
 	// Group 引用 ConfigSchema.Groups 里某个组的 ID；空串表示不分组。
 	Group string   `json:"group,omitempty"`
 	UI    *FieldUI `json:"ui,omitempty"`
@@ -98,6 +107,13 @@ func (s ConfigSchema) validate(pluginID string) error {
 		if !fieldTypes[f.Type] {
 			return fmt.Errorf("插件 %s: 字段 %s 类型未知 %q", pluginID, f.Name, f.Type)
 		}
+		if f.Retired {
+			// 撤掉的字段不渲染也不校验取值，剩下的规则对它没有意义。
+			if f.Required {
+				return fmt.Errorf("插件 %s: 字段 %s 不能同时是 retired 和 required", pluginID, f.Name)
+			}
+			continue
+		}
 		if (f.Type == "select" || f.Type == "multiselect") && len(f.Options) == 0 {
 			return fmt.Errorf("插件 %s: %s 字段 %s 必须有 options", pluginID, f.Type, f.Name)
 		}
@@ -124,11 +140,12 @@ func (s ConfigSchema) Field(name string) (Field, bool) {
 	return Field{}, false
 }
 
-// SecretFields 返回所有 secret 字段。
+// SecretFields 返回所有 secret 字段。撤掉的字段不算——宿主拿这个列表决定插件能
+// reveal 哪些密钥引用，已经不读的字段没理由还留着这份权限。
 func (s ConfigSchema) SecretFields() []Field {
 	var out []Field
 	for _, f := range s.Fields {
-		if f.Secret {
+		if f.Secret && !f.Retired {
 			out = append(out, f)
 		}
 	}
@@ -165,6 +182,11 @@ func (s ConfigSchema) Validate(config map[string]any) (map[string]any, error) {
 	}
 
 	for _, f := range s.Fields {
+		if f.Retired {
+			// 只是让老配置里的这个键不被判成「未声明的字段」；取值不校验，也不
+			// 往 out 里放——用户下次保存配置时它就消失了。
+			continue
+		}
 		value, present := config[f.Name]
 		if !present || isBlank(value) {
 			if f.Default != nil {

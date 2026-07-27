@@ -146,6 +146,40 @@ func TestValidateMultiselectRejectsUnknownOption(t *testing.T) {
 	}
 }
 
+// 撤掉一个配置项时，已装实例的配置里还留着它。不认的话 Validate 判「未声明的字段」，
+// 用户一打开设置页就是一片红，连保存都保存不了。
+func TestValidateRetiredField(t *testing.T) {
+	schema := ConfigSchema{Fields: []Field{
+		{Name: "token", Type: "password", Label: "令牌", Secret: true},
+		{Name: "api_key", Type: "password", Label: "旧 Key", Secret: true, Retired: true},
+	}}
+
+	out, err := schema.Validate(map[string]any{"token": "ref-1", "api_key": "ref-0"})
+	if err != nil {
+		t.Fatalf("撤掉的字段不该让老配置校验失败: %v", err)
+	}
+	// 不进归一化结果，用户下次保存配置时这个键就消失了。
+	if _, ok := out["api_key"]; ok {
+		t.Errorf("撤掉的字段不该出现在归一化后的配置里: %+v", out)
+	}
+	if out["token"] != "ref-1" {
+		t.Errorf("在用的字段应照常输出: %+v", out)
+	}
+	// 已经不读的字段没理由还带着 reveal 权限。
+	for _, field := range schema.SecretFields() {
+		if field.Name == "api_key" {
+			t.Error("撤掉的 secret 字段不该出现在 SecretFields 里")
+		}
+	}
+
+	badRetired := ConfigSchema{Fields: []Field{
+		{Name: "a", Type: "string", Label: "A", Required: true, Retired: true},
+	}}
+	if err := badRetired.validate("test"); err == nil {
+		t.Error("retired + required 应报错")
+	}
+}
+
 func TestSchemaSelfValidation(t *testing.T) {
 	bad := ConfigSchema{Fields: []Field{{Name: "a", Type: "select", Label: "A"}}}
 	if err := bad.validate("test"); err == nil {
