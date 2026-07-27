@@ -15,13 +15,21 @@ const EventLibraryRefreshPending = "library.refresh.pending"
 
 // LibraryRefreshPending 是该事件 payload 里字幕插件用得上的那部分。
 //
-// payload 本身还带着 transfer、files 等整理信息，这里只挑出「哪些文件还缺中文字幕、
-// 各自什么情况、上哪儿找」。字段是宿主与插件之间的契约，别照着 map 的键名自己解析：
-// 键名变了编译期发现不了，运行期表现是插件默默什么都不干。
+// payload 本身还带着 transfer、files 等整理信息，这里只挑出「哪些文件还缺字幕、
+// 各自什么情况、要哪些语言、上哪儿找」。字段是宿主与插件之间的契约，别照着 map 的
+// 键名自己解析：键名变了编译期发现不了，运行期表现是插件默默什么都不干。
 type LibraryRefreshPending struct {
-	// Files 是还缺中文字幕的视频。宿主每投一个插件前都会重算，前一个插件搞定的
+	// Files 是还缺字幕的视频。宿主每投一个插件前都会重算，前一个插件搞定的
 	// 文件不会再出现在这里——所以它为空就是"没你的活了"，直接返回即可。
 	Files []SubtitleTarget
+	// Languages 是用户设置的字幕语言，按优先级从高到低（如 ["zh-CN","zh-TW"]）。
+	//
+	// 插件搜什么语言、在多个候选里挑哪个，都以它为准，别自己写死一门语言——宿主
+	// 那边「这个文件还缺不缺字幕」用的是同一份设置，两边不一致就会没完没了：插件
+	// 下了一份宿主不认的语言，宿主下轮整理照样判定还缺，于是再投递一次。
+	//
+	// 为空说明宿主版本比这个字段老，退回插件自己的默认值即可。
+	Languages []string
 	// Context 是找字幕要用的来源信息，插件够不着宿主数据库，只能由宿主发下来。
 	Context SubtitleLookup
 	// MediaType 是 movie 或 series；Title 是媒体标题。
@@ -67,6 +75,8 @@ func ParseLibraryRefreshPending(payload map[string]any) LibraryRefreshPending {
 	media := payloadMap(payload, "media")
 	out.MediaType = payloadString(media, "type")
 	out.Title = payloadString(media, "title")
+
+	out.Languages = payloadStringList(payload, "subtitle_languages")
 
 	lookup := payloadMap(payload, "subtitle_context")
 	out.Context = SubtitleLookup{
@@ -147,6 +157,27 @@ func payloadList(payload map[string]any, key string) []any {
 		out := make([]any, 0, len(typed))
 		for _, entry := range typed {
 			out = append(out, entry)
+		}
+		return out
+	}
+	return nil
+}
+
+// payloadStringList 认 []string 和 []any 两种形状：进程内投递保持宿主构造时的
+// []string，过一趟 RPC 的 JSON 就变成 []any 了。
+func payloadStringList(payload map[string]any, key string) []string {
+	if payload == nil {
+		return nil
+	}
+	switch value := payload[key].(type) {
+	case []string:
+		return append([]string(nil), value...)
+	case []any:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				out = append(out, strings.TrimSpace(text))
+			}
 		}
 		return out
 	}

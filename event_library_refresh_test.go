@@ -100,3 +100,28 @@ func TestParseLibraryRefreshPendingLeavesTracksNilWhenAbsent(t *testing.T) {
 		t.Fatalf("空轨道列表目前也归为未探到: %+v", empty.Files[0].Tracks)
 	}
 }
+
+// 语言列表过 RPC 会从 []string 变成 []any，只认一种的话插件在另一种投递方式下
+// 会静默拿到空列表，然后退回自己写死的语言——跟宿主的判断当场分叉。
+func TestParseLibraryRefreshPendingLanguages(t *testing.T) {
+	fromProcess := ParseLibraryRefreshPending(map[string]any{
+		"subtitle_languages": []string{"zh-CN", "zh-TW"},
+	})
+	if got := fromProcess.Languages; len(got) != 2 || got[0] != "zh-CN" || got[1] != "zh-TW" {
+		t.Fatalf("进程内投递 Languages = %v", got)
+	}
+
+	fromJSON := ParseLibraryRefreshPending(map[string]any{
+		"subtitle_languages": []any{"zh-CN", "  ", "en"},
+	})
+	if got := fromJSON.Languages; len(got) != 2 || got[0] != "zh-CN" || got[1] != "en" {
+		t.Fatalf("JSON 投递 Languages = %v", got)
+	}
+}
+
+// 老宿主不发这个字段，插件得能看出来并退回自己的默认值。
+func TestParseLibraryRefreshPendingLanguagesAbsent(t *testing.T) {
+	if got := ParseLibraryRefreshPending(map[string]any{}).Languages; len(got) != 0 {
+		t.Fatalf("缺字段时 Languages 应为空，实际 %v", got)
+	}
+}
