@@ -618,6 +618,33 @@ type SubtitleSearchRequest struct {
 	// Context 是来源相关的透传信息，如 PT 站字幕插件需要的
 	// site_account_id 和 detail_url；由宿主按下载任务来源填充。
 	Context map[string]string `json:"context,omitempty"`
+	// Tracks 是宿主探测到的视频内嵌轨道，插件据此自己判断这次值不值得搜。
+	//
+	// 「片子本身就是国语」「里面已经压了中文字幕」这类判断以前只有宿主做得了：插件
+	// 收到请求时对目标文件一无所知，只能盲搜一通再由宿主把结果丢掉。轨道信息给到
+	// 插件手上，它才谈得上自己决定要不要出手。为空表示宿主没探测到（未启用或探测失败），
+	// 不代表视频里没有轨道。
+	Tracks *MediaTracks `json:"tracks,omitempty"`
+}
+
+// MediaTracks 是宿主探测到的、目标视频里已有的音轨与字幕轨。
+type MediaTracks struct {
+	Audios    []MediaAudioTrack    `json:"audios,omitempty"`
+	Subtitles []MediaSubtitleTrack `json:"subtitles,omitempty"`
+}
+
+type MediaAudioTrack struct {
+	Codec    string `json:"codec,omitempty"`
+	Language string `json:"language,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Channels int    `json:"channels,omitempty"`
+}
+
+type MediaSubtitleTrack struct {
+	Codec    string `json:"codec,omitempty"`
+	Language string `json:"language,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Forced   bool   `json:"forced,omitempty"`
 }
 
 // SubtitleResult 是归一化的候选字幕。

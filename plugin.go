@@ -428,6 +428,12 @@ type EventSubscription struct {
 	Version int    `yaml:"version" json:"version"`
 	Phase   string `yaml:"phase,omitempty" json:"phase,omitempty"`
 	Mode    string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Priority 决定同步钩子位上的执行顺序，小的先跑；默认 0，同值退回插件 id 字典序。
+	//
+	// 顺序有时候带语义：字幕钩子上 PT 站附件该先于公开字幕库试一次，站点自带的字幕跟
+	// 这个种子严格对得上。默认的 id 字典序纯属巧合（opensubtitles 恰好排在
+	// site-subtitles 前面），靠它编排等于没编排。
+	Priority int `yaml:"priority,omitempty" json:"priority,omitempty"`
 }
 
 type EventResource struct {
@@ -492,7 +498,10 @@ type Instance struct {
 	// PluginServices 经宿主 broker 调用其他插件的业务 API；只在插件声明了
 	// host 权限 "plugin_service.<provider>/<service>" 时由宿主注入。
 	PluginServices PluginServices
-	Runtime        *runtimesdk.Services
+	// Sidecars 把字幕这类随媒体文件存放的附属文件交给宿主落盘；只在插件声明了
+	// host 权限 "media.sidecar.write" 时由宿主注入。
+	Sidecars MediaSidecars
+	Runtime  *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。

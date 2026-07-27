@@ -35,6 +35,7 @@ type hostServicesServer struct {
 	schedules         pluginsdk.Schedules
 	settings          pluginsdk.Settings
 	pluginServices    pluginsdk.PluginServices
+	sidecars          pluginsdk.MediaSidecars
 }
 
 type RevealRequest struct {
@@ -502,6 +503,30 @@ func (s *hostServicesServer) CallPluginService(req PluginServiceCallRequest, rep
 	return err
 }
 
+type SubtitleWriteRequest struct {
+	Input pluginsdk.SubtitleWrite
+}
+
+// WriteSubtitle 是插件唯一能落文件的口子。插件给的是 FileRef 而不是路径，
+// 由宿主自己解析成存储和目标文件名——插件既指不了目录，也没法用 ../ 走出去。
+func (s *hostServicesServer) WriteSubtitle(req SubtitleWriteRequest, reply *JSONReply) error {
+	if s.sidecars == nil {
+		return fmt.Errorf("宿主未提供 MediaSidecars")
+	}
+	if err := s.requireHostPermission("media.sidecar.write"); err != nil {
+		return err
+	}
+	result, err := s.sidecars.WriteSubtitle(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
 func (s *hostServicesServer) UpsertSiteAccount(req SiteAccountUpsertRequest, reply *JSONReply) error {
 	if s.siteAccounts == nil {
 		return fmt.Errorf("宿主未提供 SiteAccounts")
@@ -856,6 +881,15 @@ func (c *hostServicesClient) CallPluginService(_ context.Context, call pluginsdk
 		return pluginsdk.PluginServiceResult{}, err
 	}
 	var result pluginsdk.PluginServiceResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) WriteSubtitle(_ context.Context, input pluginsdk.SubtitleWrite) (pluginsdk.SubtitleWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.WriteSubtitle", SubtitleWriteRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.SubtitleWriteResult{}, err
+	}
+	var result pluginsdk.SubtitleWriteResult
 	return result, decodeJSON(reply.Data, &result)
 }
 
