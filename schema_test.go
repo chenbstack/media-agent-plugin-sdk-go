@@ -57,10 +57,103 @@ func TestValidateErrors(t *testing.T) {
 	}
 }
 
+var multiSchema = ConfigSchema{Fields: []Field{
+	{Name: "languages", Type: "multiselect", Label: "语言", Default: []any{"zh-cn", "en"}, Options: []Option{
+		{Value: "zh-cn", Label: "简体中文"},
+		{Value: "zh-tw", Label: "繁体中文"},
+		{Value: "en", Label: "英语"},
+	}},
+	{Name: "tags", Type: "multiselect", Label: "标签", Required: true, Options: []Option{
+		{Value: "a", Label: "A"}, {Value: "b", Label: "B"},
+	}},
+}}
+
+func TestValidateMultiselect(t *testing.T) {
+	out, err := multiSchema.Validate(map[string]any{
+		// []any 是过一趟 JSON 之后的形状。
+		"languages": []any{"en", "zh-cn"},
+		"tags":      []string{"b", "a"},
+	})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	// 勾选先后不该决定顺序，否则同一份配置在两次编辑后行为不同。
+	if got, ok := out["languages"].([]string); !ok || len(got) != 2 || got[0] != "zh-cn" || got[1] != "en" {
+		t.Errorf("应按 options 声明顺序归一化: %#v", out["languages"])
+	}
+	if got, ok := out["tags"].([]string); !ok || got[0] != "a" || got[1] != "b" {
+		t.Errorf("[]string 输入也应归一化: %#v", out["tags"])
+	}
+}
+
+// 缺省值在 schema.json 里是 JSON 数组、用户勾选过的是 []string；两种形状都漏给插件
+// 的话，插件侧就得两边都认。
+func TestValidateMultiselectDefaultIsNormalized(t *testing.T) {
+	out, err := multiSchema.Validate(map[string]any{"tags": []any{"a"}})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	got, ok := out["languages"].([]string)
+	if !ok || len(got) != 2 || got[0] != "zh-cn" || got[1] != "en" {
+		t.Fatalf("缺省值应归一成 []string: %#v", out["languages"])
+	}
+}
+
+// 这个字段从 string 改成 multiselect 之前存下来的配置是逗号分隔的字符串。不认它的话，
+// 升级后老实例会卡在「应为字符串列表」上，用户得手动重填一遍才能保存。
+func TestValidateMultiselectAcceptsLegacyCommaString(t *testing.T) {
+	out, err := multiSchema.Validate(map[string]any{
+		"languages": "en, zh-tw",
+		"tags":      "a",
+	})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	got, _ := out["languages"].([]string)
+	if len(got) != 2 || got[0] != "zh-tw" || got[1] != "en" {
+		t.Fatalf("逗号字符串应认: %#v", out["languages"])
+	}
+}
+
+// 全不勾时前端交上来的是空数组，跟一个字都没填是同一件事：required 要拦住它，
+// 有 default 的要退回 default。
+func TestValidateMultiselectTreatsEmptyAsBlank(t *testing.T) {
+	out, err := multiSchema.Validate(map[string]any{"languages": []any{}, "tags": []string{"a"}})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, _ := out["languages"].([]string); len(got) != 2 {
+		t.Errorf("空数组应退回 default: %#v", out["languages"])
+	}
+
+	_, err = multiSchema.Validate(map[string]any{"tags": []any{}})
+	var verr *ValidationError
+	if !errors.As(err, &verr) || verr.Fields["tags"] != "必填" {
+		t.Fatalf("空数组不该绕过 required: %v", err)
+	}
+}
+
+func TestValidateMultiselectRejectsUnknownOption(t *testing.T) {
+	_, err := multiSchema.Validate(map[string]any{"languages": []any{"zh-cn", "kl"}, "tags": []any{"a"}})
+	var verr *ValidationError
+	if !errors.As(err, &verr) || verr.Fields["languages"] == "" {
+		t.Fatalf("选项外的取值应报错: %v", err)
+	}
+
+	_, err = multiSchema.Validate(map[string]any{"languages": []any{1, 2}, "tags": []any{"a"}})
+	if !errors.As(err, &verr) || verr.Fields["languages"] != "应为字符串列表" {
+		t.Fatalf("非字符串元素应报错: %v", err)
+	}
+}
+
 func TestSchemaSelfValidation(t *testing.T) {
 	bad := ConfigSchema{Fields: []Field{{Name: "a", Type: "select", Label: "A"}}}
 	if err := bad.validate("test"); err == nil {
 		t.Error("select 无 options 应报错")
+	}
+	badMulti := ConfigSchema{Fields: []Field{{Name: "a", Type: "multiselect", Label: "A"}}}
+	if err := badMulti.validate("test"); err == nil {
+		t.Error("multiselect 无 options 应报错")
 	}
 	dup := ConfigSchema{Fields: []Field{
 		{Name: "a", Type: "string", Label: "A"},

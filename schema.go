@@ -27,14 +27,17 @@ type FieldGroup struct {
 }
 
 type Field struct {
-	Name        string   `json:"name"`
-	Type        string   `json:"type"` // string / password / url / number / boolean / select / path
-	Label       string   `json:"label"`
-	Required    bool     `json:"required,omitempty"`
-	Secret      bool     `json:"secret,omitempty"`
-	Default     any      `json:"default,omitempty"`
-	Placeholder string   `json:"placeholder,omitempty"`
-	Help        string   `json:"help,omitempty"`
+	Name        string `json:"name"`
+	Type        string `json:"type"` // string / password / url / number / boolean / select / multiselect / path
+	Label       string `json:"label"`
+	Required    bool   `json:"required,omitempty"`
+	Secret      bool   `json:"secret,omitempty"`
+	Default     any    `json:"default,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Help        string `json:"help,omitempty"`
+	// Options 是 select / multiselect 的候选项。multiselect 的取值是字符串数组，
+	// 归一化后按 Options 的声明顺序排列——存进来的顺序取决于用户点选的先后，
+	// 让它决定语言优先级之类的语义，会让同一份配置在两次编辑后行为不同。
 	Options     []Option `json:"options,omitempty"`
 	AllowCustom bool     `json:"allow_custom,omitempty"`
 	Multiline   bool     `json:"multiline,omitempty"`
@@ -69,7 +72,7 @@ type Option struct {
 
 var fieldTypes = map[string]bool{
 	"string": true, "password": true, "url": true, "number": true,
-	"boolean": true, "select": true, "path": true,
+	"boolean": true, "select": true, "multiselect": true, "path": true,
 }
 
 func (s ConfigSchema) validate(pluginID string) error {
@@ -95,8 +98,8 @@ func (s ConfigSchema) validate(pluginID string) error {
 		if !fieldTypes[f.Type] {
 			return fmt.Errorf("插件 %s: 字段 %s 类型未知 %q", pluginID, f.Name, f.Type)
 		}
-		if f.Type == "select" && len(f.Options) == 0 {
-			return fmt.Errorf("插件 %s: select 字段 %s 必须有 options", pluginID, f.Name)
+		if (f.Type == "select" || f.Type == "multiselect") && len(f.Options) == 0 {
+			return fmt.Errorf("插件 %s: %s 字段 %s 必须有 options", pluginID, f.Type, f.Name)
 		}
 		if f.Secret && f.Type != "password" && f.Type != "string" {
 			return fmt.Errorf("插件 %s: secret 字段 %s 只能是 password 或 string 类型", pluginID, f.Name)
@@ -147,7 +150,7 @@ func (e *ValidationError) Error() string {
 
 // Validate 校验并归一化实例配置：
 //   - 未声明的字段拒绝
-//   - 必填、类型、select 取值校验
+//   - 必填、类型、select / multiselect 取值校验
 //   - 缺省字段填充 default
 //
 // secret 字段的值在此处是字符串（保存前为明文，保存后为 secret 引用），只做非空校验。
@@ -163,9 +166,9 @@ func (s ConfigSchema) Validate(config map[string]any) (map[string]any, error) {
 
 	for _, f := range s.Fields {
 		value, present := config[f.Name]
-		if !present || value == nil || value == "" {
+		if !present || isBlank(value) {
 			if f.Default != nil {
-				out[f.Name] = f.Default
+				out[f.Name] = f.defaultValue()
 				continue
 			}
 			if f.Required {
@@ -185,6 +188,42 @@ func (s ConfigSchema) Validate(config map[string]any) (map[string]any, error) {
 		return nil, &ValidationError{Fields: errs}
 	}
 	return out, nil
+}
+
+// defaultValue 返回填充用的缺省值。
+//
+// multiselect 的缺省值在 config.schema.json 里是 JSON 数组，解析出来是 []any；
+// 用户勾选过的实例存的却是 []string。同一个字段两种形状，插件侧就得两边都认。
+// 这里把缺省值也过一遍 check 抹平——其它类型维持原样，缺省值不做校验是既有行为，
+// 没必要借这次改动一起翻。
+func (f Field) defaultValue() any {
+	if f.Type != "multiselect" {
+		return f.Default
+	}
+	normalized, err := f.check(f.Default)
+	if err != "" {
+		// 缺省值写错是插件自己的问题，但校验期不是报它的地方（这条路径上用户
+		// 一个字都没填）。原样返回，让 validate() 那边的 options 检查去暴露。
+		return f.Default
+	}
+	return normalized
+}
+
+// isBlank 认「用户什么都没填」，好让 default 填充和 required 校验对所有类型一致。
+// multiselect 全不勾时前端交上来的是空数组，那跟空字符串是同一件事——不这么认的话，
+// 空数组会绕过 required 直接存下去。
+func isBlank(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return true
+	case string:
+		return v == ""
+	case []string:
+		return len(v) == 0
+	case []any:
+		return len(v) == 0
+	}
+	return false
 }
 
 func (f Field) check(value any) (any, string) {
@@ -231,18 +270,83 @@ func (f Field) check(value any) (any, string) {
 		if !ok {
 			return nil, "应为字符串"
 		}
+		if !f.optionAllows(str) {
+			return nil, "取值不在选项内"
+		}
+		return str, ""
+	case "multiselect":
+		items, ok := stringList(value)
+		if !ok {
+			return nil, "应为字符串列表"
+		}
+		seen := map[string]bool{}
+		picked := map[string]bool{}
+		for _, item := range items {
+			if !f.optionAllows(item) {
+				return nil, "取值不在选项内"
+			}
+			seen[item] = true
+		}
+		// 按 Options 的声明顺序输出，勾选先后不参与决定顺序（见 Field.Options 注释）。
+		out := make([]string, 0, len(seen))
 		for _, opt := range f.Options {
-			if opt.Value == str {
-				return str, ""
+			if seen[opt.Value] && !picked[opt.Value] {
+				picked[opt.Value] = true
+				out = append(out, opt.Value)
 			}
 		}
-		// 动态选项或自定义选项无法在 schema 里穷举，放行非空取值。
-		if (f.DynamicOptions || f.AllowCustom) && str != "" {
-			return str, ""
+		// 自定义/动态选项排在声明项之后，它们之间保留输入顺序。
+		for _, item := range items {
+			if !picked[item] {
+				picked[item] = true
+				out = append(out, item)
+			}
 		}
-		return nil, "取值不在选项内"
+		return out, ""
 	}
 	return nil, "未知类型"
+}
+
+// optionAllows 判断单个取值是否落在候选项里。动态选项或自定义选项无法在 schema 里
+// 穷举，放行非空取值。
+func (f Field) optionAllows(value string) bool {
+	for _, opt := range f.Options {
+		if opt.Value == value {
+			return true
+		}
+	}
+	return (f.DynamicOptions || f.AllowCustom) && value != ""
+}
+
+// stringList 把 multiselect 的取值归一成字符串切片。
+//
+// []any 是过一趟 JSON 之后的形状；逗号分隔的字符串是这个字段从 string 改成
+// multiselect 之前存下来的旧配置——不认它的话，升级后老实例会卡在「应为字符串列表」
+// 上，用户得手动重填一遍才能保存。
+func stringList(value any) ([]string, bool) {
+	switch v := value.(type) {
+	case []string:
+		return v, true
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			str, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, str)
+		}
+		return out, true
+	case string:
+		var out []string
+		for _, part := range strings.Split(v, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, part)
+			}
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 // MustParseConfigSchema 解析 go:embed 的 config.schema.json。
