@@ -24,11 +24,19 @@ type SubtitleWrite struct {
 
 // SubtitleWriteResult 是一次字幕落盘的结果。
 type SubtitleWriteResult struct {
-	// Path 是宿主实际写入的 sidecar 路径，只用于展示和排查。
+	// Path 是宿主实际写入（或已存在）的 sidecar 路径，只用于展示和排查。
 	Path string `json:"path"`
-	// Change：created 新建 / updated 覆盖了同名文件 / unchanged 内容一致未动盘。
+	// Change：created 落盘成功 / unchanged 同名文件已存在，宿主保留原文件没有覆盖。
+	//
+	// unchanged 不是失败，但插件该把它当成"我这次没起作用"——别再拿它当成功证据去
+	// 跳过后续来源。
 	Change string `json:"change"`
 }
+
+const (
+	SubtitleWriteCreated   = "created"
+	SubtitleWriteUnchanged = "unchanged"
+)
 
 // MediaSidecars 让插件把随媒体文件存放的附属文件交给宿主落盘。
 //
