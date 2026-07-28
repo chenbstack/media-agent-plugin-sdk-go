@@ -52,6 +52,16 @@ type SubtitleTarget struct {
 	// Tracks 是宿主用 ffprobe 探到的轨道现状。为 nil 表示没探到（不是"没有轨道"）,
 	// 这两种情况该做的判断不一样。
 	Tracks *providers.MediaTracks
+	// MovieHash 是这个文件的 OSDb hash，SizeBytes 是它的字节数，两者一起交给
+	// OpenSubtitles 这类按内容匹配的来源。
+	//
+	// 精确匹配和按名字猜是两回事：同一部片同一个命名之下，不同压制的时间轴对不上，
+	// 按名字挑出来的字幕经常是错轴的，而错轴字幕比没有更糟——它会让宿主判定这片
+	// 字幕齐了，从此不再补。
+	//
+	// 宿主算不出来时为空：存储不支持区间读，或者文件小于 128KB 凑不满采样。
+	MovieHash string
+	SizeBytes int64
 }
 
 // SubtitleLookup 是宿主发下来的字幕检索线索。
@@ -105,6 +115,8 @@ func ParseLibraryRefreshPending(payload map[string]any) LibraryRefreshPending {
 			Season:    payloadInt(entry, "season"),
 			Episode:   payloadInt(entry, "episode"),
 			Tracks:    payloadTracks(entry),
+			MovieHash: payloadString(entry, "movie_hash"),
+			SizeBytes: int64(payloadInt(entry, "size_bytes")),
 		})
 	}
 	return out

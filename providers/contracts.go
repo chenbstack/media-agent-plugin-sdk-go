@@ -615,6 +615,18 @@ type SubtitleSearchRequest struct {
 	TMDBID        int64    `json:"tmdb_id,omitempty"`
 	FileName      string   `json:"file_name,omitempty"` // 目标视频文件名，用于按命名匹配
 	Languages     []string `json:"languages,omitempty"` // 期望语言优先级，如 ["zh", "en"]
+	// MovieHash 是目标视频的 OSDb hash：文件长度，加上头尾各 64KB 按小端 uint64
+	// 累加，取低 64 位，输出 16 位小写十六进制。OpenSubtitles 等来源用它做精确匹配。
+	//
+	// 它和文件名匹配不是一回事：同一部片同一个命名之下，不同压制的时间轴对不上，
+	// 按名字挑出来的字幕经常是错轴的。hash 对得上才说明字幕就是给这一版做的。
+	//
+	// 宿主算不出来时为空——存储不支持区间读，或者文件小于 128KB 凑不满头尾两段。
+	// 为空不代表文件有问题，插件自己决定是退回其它匹配方式还是干脆不搜。
+	MovieHash string `json:"movie_hash,omitempty"`
+	// FileSizeBytes 是目标视频的字节数。它是 OSDb hash 的一部分，来源侧通常要求
+	// 跟 hash 一起提交才认。
+	FileSizeBytes int64 `json:"file_size_bytes,omitempty"`
 	// Context 是来源相关的透传信息，如 PT 站字幕插件需要的
 	// site_account_id 和 detail_url；由宿主按下载任务来源填充。
 	Context map[string]string `json:"context,omitempty"`
