@@ -74,6 +74,12 @@ type FieldUI struct {
 	Width string `json:"width,omitempty"`
 }
 
+// BrowseStorageInstance 让 select 字段渲染成"选一个已配置的存储"，取值是存储 id。
+//
+// 候选项由宿主界面直接取存储列表填充，因此插件既不用实现 FieldOptions，也不用为了
+// 填一个下拉框去要 storages.read。取值同理无法在 schema 里穷举，见 optionAllows。
+const BrowseStorageInstance = "storage.instance"
+
 type Option struct {
 	Value string `json:"value"`
 	Label string `json:"label"`
@@ -329,15 +335,20 @@ func (f Field) check(value any) (any, string) {
 	return nil, "未知类型"
 }
 
-// optionAllows 判断单个取值是否落在候选项里。动态选项或自定义选项无法在 schema 里
-// 穷举，放行非空取值。
+// optionAllows 判断单个取值是否落在候选项里。动态选项、自定义选项，以及由宿主界面
+// 填充候选项的 browse 字段都无法在 schema 里穷举，放行非空取值。
 func (f Field) optionAllows(value string) bool {
 	for _, opt := range f.Options {
 		if opt.Value == value {
 			return true
 		}
 	}
-	return (f.DynamicOptions || f.AllowCustom) && value != ""
+	return (f.DynamicOptions || f.AllowCustom || f.optionsFilledByHost()) && value != ""
+}
+
+// optionsFilledByHost 表示候选项来自宿主界面而非 schema 声明。
+func (f Field) optionsFilledByHost() bool {
+	return f.UI != nil && f.UI.Browse == BrowseStorageInstance
 }
 
 // stringList 把 multiselect 的取值归一成字符串切片。

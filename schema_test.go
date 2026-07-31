@@ -146,6 +146,34 @@ func TestValidateMultiselectRejectsUnknownOption(t *testing.T) {
 	}
 }
 
+// 存储 id 是用户装出来的，schema 写不出候选项。不放行的话，用户在界面上选中一个
+// 存储、保存时会被判「取值不在选项内」——这个字段永远存不进去。
+func TestValidateStorageInstanceFieldAcceptsAnyStorageID(t *testing.T) {
+	schema := ConfigSchema{Fields: []Field{{
+		Name:    "target_storage_id",
+		Type:    "select",
+		Label:   "目标存储",
+		Options: []Option{{Value: "", Label: "请选择存储"}},
+		UI:      &FieldUI{Browse: BrowseStorageInstance},
+	}}}
+
+	out, err := schema.Validate(map[string]any{"target_storage_id": "st_7f3a"})
+	if err != nil {
+		t.Fatalf("存储 id 应当被接受: %v", err)
+	}
+	if out["target_storage_id"] != "st_7f3a" {
+		t.Fatalf("归一化结果 = %+v", out)
+	}
+
+	// 没有这个 browse 标记的 select 仍然只认声明过的选项。
+	plain := ConfigSchema{Fields: []Field{{
+		Name: "mode", Type: "select", Label: "模式", Options: []Option{{Value: "a", Label: "A"}},
+	}}}
+	if _, err := plain.Validate(map[string]any{"mode": "st_7f3a"}); err == nil {
+		t.Error("普通 select 不该放行选项外的取值")
+	}
+}
+
 // 撤掉一个配置项时，已装实例的配置里还留着它。不认的话 Validate 判「未声明的字段」，
 // 用户一打开设置页就是一片红，连保存都保存不了。
 func TestValidateRetiredField(t *testing.T) {
