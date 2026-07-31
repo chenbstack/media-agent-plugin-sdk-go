@@ -501,7 +501,14 @@ type Instance struct {
 	// Sidecars 把字幕这类随媒体文件存放的附属文件交给宿主落盘；只在插件声明了
 	// host 权限 "media.sidecar.write" 时由宿主注入。
 	Sidecars MediaSidecars
-	Runtime  *runtimesdk.Services
+	// Mirrors 把 .strm 这类"在另一个存储里按原相对路径生成的替身文件"交给宿主落盘；
+	// 只在插件声明了 host 权限 "media.mirror.write" 时由宿主注入。
+	Mirrors MediaMirrors
+	// Workspace 是宿主分配给本插件的私有工作目录，放解压产物、下载缓存这类只有插件
+	// 自己关心的文件；只在插件声明了 host 权限 "workspace.local" 时由宿主注入。
+	// 用户的媒体文件不在里面，也不该往里面放——那是 Sidecars / Mirrors 的事。
+	Workspace *Workspace
+	Runtime *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。

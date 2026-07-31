@@ -36,6 +36,7 @@ type hostServicesServer struct {
 	settings          pluginsdk.Settings
 	pluginServices    pluginsdk.PluginServices
 	sidecars          pluginsdk.MediaSidecars
+	mirrors           pluginsdk.MediaMirrors
 }
 
 type RevealRequest struct {
@@ -527,6 +528,30 @@ func (s *hostServicesServer) WriteSubtitle(req SubtitleWriteRequest, reply *JSON
 	return err
 }
 
+type MirrorWriteRequest struct {
+	Input pluginsdk.MirrorWrite
+}
+
+// WriteMirror 和 WriteSubtitle 一样只收 FileRef 不收路径：目标存储由用户的插件配置
+// 决定，存储内的相对路径由宿主从 FileRef 推导，插件指不了目录也走不出去。
+func (s *hostServicesServer) WriteMirror(req MirrorWriteRequest, reply *JSONReply) error {
+	if s.mirrors == nil {
+		return fmt.Errorf("宿主未提供 MediaMirrors")
+	}
+	if err := s.requireHostPermission("media.mirror.write"); err != nil {
+		return err
+	}
+	result, err := s.mirrors.WriteMirror(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
 func (s *hostServicesServer) UpsertSiteAccount(req SiteAccountUpsertRequest, reply *JSONReply) error {
 	if s.siteAccounts == nil {
 		return fmt.Errorf("宿主未提供 SiteAccounts")
@@ -890,6 +915,15 @@ func (c *hostServicesClient) WriteSubtitle(_ context.Context, input pluginsdk.Su
 		return pluginsdk.SubtitleWriteResult{}, err
 	}
 	var result pluginsdk.SubtitleWriteResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) WriteMirror(_ context.Context, input pluginsdk.MirrorWrite) (pluginsdk.MirrorWriteResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.WriteMirror", MirrorWriteRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.MirrorWriteResult{}, err
+	}
+	var result pluginsdk.MirrorWriteResult
 	return result, decodeJSON(reply.Data, &result)
 }
 

@@ -143,9 +143,14 @@ type BrokerReply struct {
 }
 
 type InstancePayload struct {
-	ID                   string
-	Name                 string
-	ConfigJSON           []byte
+	ID         string
+	Name       string
+	ConfigJSON []byte
+	// WorkspaceDir 是插件私有工作目录的绝对路径，空串表示宿主没给。
+	//
+	// 它不走 broker：工作目录里的读写由插件子进程自己做，宿主这边只需要把路径告诉
+	// 它。子进程与宿主在同一文件系统命名空间里，路径直接可用。
+	WorkspaceDir         string
 	HostServicesBrokerID uint32
 }
 

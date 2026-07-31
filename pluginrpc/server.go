@@ -662,7 +662,13 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 	if err != nil {
 		return pluginsdk.Instance{}, nil, nil, err
 	}
-	inst := pluginsdk.Instance{ID: payload.ID, Name: payload.Name, Config: config, Logger: pluginsdk.NoopLogger()}
+	inst := pluginsdk.Instance{
+		ID:        payload.ID,
+		Name:      payload.Name,
+		Config:    config,
+		Logger:    pluginsdk.NoopLogger(),
+		Workspace: pluginsdk.NewWorkspace(payload.WorkspaceDir),
+	}
 	var services *hostServicesClient
 	if payload.HostServicesBrokerID != 0 {
 		conn, err := s.broker.Dial(payload.HostServicesBrokerID)
@@ -685,6 +691,7 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		inst.Settings = services
 		inst.PluginServices = services
 		inst.Sidecars = services
+		inst.Mirrors = services
 	}
 	closeFn := func() {}
 	if services != nil {
