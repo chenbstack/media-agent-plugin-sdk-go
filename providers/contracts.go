@@ -231,6 +231,18 @@ var ErrDownloaderTagsUnsupported = errors.New("downloader tags unsupported")
 type TransferInfo struct {
 	DownloadSpeed int64 // bytes/s
 	UploadSpeed   int64 // bytes/s
+
+	// TotalDownloaded/TotalUploaded 是下载器自己维护的累计传输量（bytes），宿主拿它
+	// 做差分算出「今天下了多少」——这个口径不受宿主是否在线影响，宿主停机期间的流量
+	// 会在下次读数时一次性补回来，比宿主自己按速率积分准得多。
+	//
+	// 允许是「本次会话累计」（qBittorrent 的 dl_info_data）而不必是历史总量：宿主按
+	// 单调计数器处理，读数比上次小就认为下载器重启过，从新值重新累计。
+	TotalDownloaded int64
+	TotalUploaded   int64
+	// HasTotals 标记上面两个字段是否有效。不填的实现留 false —— 零值和「真的是 0」
+	// 必须能分开，否则宿主会把「不支持」当成「今天没有流量」显示出去。
+	HasTotals bool
 }
 
 // ---- 媒体库 ----
