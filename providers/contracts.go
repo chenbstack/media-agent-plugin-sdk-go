@@ -17,6 +17,11 @@ type StorageInfo struct {
 	Capabilities []string
 	UsedBytes    int64 `json:"used_bytes,omitempty"`
 	TotalBytes   int64 `json:"total_bytes,omitempty"`
+	// CopyStreams 是这个存储实例愿意承受的并行复制流数上限，0 表示不表态、
+	// 由宿主决定。段数是插件才知道的事：同一份代码接家用 NAS 和接机房阵列，
+	// 能吃下的并发差一个量级，而宿主只看得到「两边都支持区间读写」。
+	// 宿主取源与目标里较小的那个。
+	CopyStreams int `json:"copy_streams,omitempty"`
 }
 
 // StorageProvider 屏蔽本地目录、SMB 和云盘等存储差异。
