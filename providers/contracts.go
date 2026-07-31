@@ -143,6 +143,13 @@ type DownloadState string
 const (
 	DownloadQueued      DownloadState = "queued"
 	DownloadDownloading DownloadState = "downloading"
+	// DownloadChecking 是下载器在校验已有分块（qBittorrent 的 checkingDL、
+	// Transmission 的 check）。它跟 queued 的区别对用户是要紧的：校验期间进度条
+	// 一路涨、速度却恒为 0，被并成"排队中"的话，界面说的和实际发生的正好相反。
+	//
+	// 对宿主它也不等于 queued：校验一个大种子要几分钟到几十分钟且速度必然是 0，
+	// 拿它去算"平均速度过低"会把一个好种子换掉。
+	DownloadChecking DownloadState = "checking"
 	DownloadPaused      DownloadState = "paused"
 	DownloadCompleted   DownloadState = "completed"
 	DownloadFailed      DownloadState = "failed"
