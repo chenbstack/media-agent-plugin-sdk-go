@@ -62,9 +62,10 @@ type SiteAccounts interface {
 }
 
 // PluginServiceCall 是一次跨插件服务调用：经宿主 broker 转发到目标插件
-// （Provider）在 api.plugin_services 里逐个开放的某个能力（Capability）。调用方
+// （Provider）在 api.capabilities 里以 plugin_callable: true 逐个开放的能力
+// （Capability）。调用方
 // 只按能力名引用，Method/Path 由宿主按提供方声明解析，调用方无法自行拼构。
-// 提供方需在 api.plugin_services 列出该能力，调用方需声明 host 权限
+// 提供方需显式允许该能力被插件调用，调用方需声明 host 权限
 // "plugin_service.<provider>/<capability>" 并经用户授权，两侧任一缺失宿主都会
 // 拒绝转发。Body 必须是 JSON（或为空）；提供方看到的 Principal 为
 // {ID: "plugin:<caller>", Issuer: "plugin"}。

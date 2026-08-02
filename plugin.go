@@ -77,20 +77,30 @@ type APIExtension struct {
 	Service              string      `yaml:"service" json:"service"`
 	Auth                 APIAuthMode `yaml:"auth,omitempty" json:"auth,omitempty"`
 	RequiredEntitlements []string    `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
-	// PluginServices 逐个列出本服务对外开放给其他插件调用的能力。提供方按能力
-	// 粒度声明（不点名调用方）；每个能力对应独立权限键
-	// plugin_service.<provider>/<name>，由调用方声明、用户逐项授权。未列出的
-	// 能力不对插件开放，只接受前端 session 调用。
-	PluginServices []PluginServiceExport `yaml:"plugin_services,omitempty" json:"plugin_services,omitempty"`
+	// Capabilities 声明本服务提供的具名业务能力。PluginCallable 默认 false；
+	// 只有显式开启的能力才能由其他插件经宿主 broker 调用。
+	Capabilities []APIServiceCapability `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
 }
 
-// PluginServiceExport 声明一个对插件开放的能力：Name 是能力标识（权限键与调用
-// 方按它引用），Method/Path 是宿主转发时映射到的 api.endpoint 内部路由。调用方
-// 只按 Name 调用，无法自行拼构 Method/Path。
-type PluginServiceExport struct {
-	Name   string `yaml:"name" json:"name"`
-	Method string `yaml:"method" json:"method"`
-	Path   string `yaml:"path" json:"path"`
+// APIServiceCapability 声明 api.endpoint 服务的一项具名能力。Method/Path 是
+// 宿主内部路由；PluginCallable 控制它是否进入跨插件服务总线。
+type APIServiceCapability struct {
+	Name           string `yaml:"name" json:"name"`
+	Method         string `yaml:"method" json:"method"`
+	Path           string `yaml:"path" json:"path"`
+	PluginCallable bool   `yaml:"plugin_callable,omitempty" json:"plugin_callable,omitempty"`
+}
+
+// PluginCallableCapabilities 返回本服务显式允许其他插件调用的能力。
+func (a APIExtension) PluginCallableCapabilities() []APIServiceCapability {
+	out := make([]APIServiceCapability, 0, len(a.Capabilities))
+	for _, capability := range a.Capabilities {
+		if !capability.PluginCallable {
+			continue
+		}
+		out = append(out, capability)
+	}
+	return out
 }
 
 type APIAuthMode string
@@ -508,7 +518,7 @@ type Instance struct {
 	// 自己关心的文件；只在插件声明了 host 权限 "workspace.local" 时由宿主注入。
 	// 用户的媒体文件不在里面，也不该往里面放——那是 Sidecars / Mirrors 的事。
 	Workspace *Workspace
-	Runtime *runtimesdk.Services
+	Runtime   *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。
@@ -858,21 +868,9 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 			return err
 		}
 		seenExports := map[string]struct{}{}
-		for _, export := range m.API.PluginServices {
-			if !manifestIdentifier.MatchString(export.Name) {
-				return fmt.Errorf("插件 %s: api.plugin_services 能力名 %q 格式无效", m.ID, export.Name)
-			}
-			if _, dup := seenExports[export.Name]; dup {
-				return fmt.Errorf("插件 %s: api.plugin_services 能力名重复 %q", m.ID, export.Name)
-			}
-			seenExports[export.Name] = struct{}{}
-			switch export.Method {
-			case "GET", "POST", "PUT", "PATCH", "DELETE":
-			default:
-				return fmt.Errorf("插件 %s: api.plugin_services 能力 %q 的 method %q 无效", m.ID, export.Name, export.Method)
-			}
-			if !strings.HasPrefix(export.Path, "/") {
-				return fmt.Errorf("插件 %s: api.plugin_services 能力 %q 的 path 必须以 / 开头", m.ID, export.Name)
+		for _, capability := range m.API.Capabilities {
+			if err := validateAPIServiceCapability(m.ID, "api.capabilities", capability.Name, capability.Method, capability.Path, seenExports); err != nil {
+				return err
 			}
 		}
 	}
@@ -1052,6 +1050,25 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 				return fmt.Errorf("插件 %s: identity flow %s 缺少 label", m.ID, flow.ID)
 			}
 		}
+	}
+	return nil
+}
+
+func validateAPIServiceCapability(pluginID, owner, name, method, path string, seen map[string]struct{}) error {
+	if !manifestIdentifier.MatchString(name) {
+		return fmt.Errorf("插件 %s: %s 能力名 %q 格式无效", pluginID, owner, name)
+	}
+	if _, dup := seen[name]; dup {
+		return fmt.Errorf("插件 %s: api 能力名重复 %q", pluginID, name)
+	}
+	seen[name] = struct{}{}
+	switch method {
+	case "GET", "POST", "PUT", "PATCH", "DELETE":
+	default:
+		return fmt.Errorf("插件 %s: %s 能力 %q 的 method %q 无效", pluginID, owner, name, method)
+	}
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("插件 %s: %s 能力 %q 的 path 必须以 / 开头", pluginID, owner, name)
 	}
 	return nil
 }

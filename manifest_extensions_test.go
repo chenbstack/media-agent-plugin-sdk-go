@@ -20,10 +20,14 @@ capabilities:
 api:
   service: app
   auth: session
-  plugin_services:
-    - name: requests.count
+  capabilities:
+    - name: requests.preview
       method: GET
-      path: /requests/count
+      path: /requests/preview
+    - name: requests.create
+      method: POST
+      path: /requests
+      plugin_callable: true
   required_entitlements:
     - collaboration.requests.enabled
 ui:
@@ -90,9 +94,12 @@ resources:
 	if manifest.API == nil || manifest.API.Service != "app" {
 		t.Fatalf("api = %#v", manifest.API)
 	}
-	if len(manifest.API.PluginServices) != 1 || manifest.API.PluginServices[0].Name != "requests.count" ||
-		manifest.API.PluginServices[0].Method != "GET" || manifest.API.PluginServices[0].Path != "/requests/count" {
-		t.Fatalf("api plugin_services = %#v", manifest.API.PluginServices)
+	if len(manifest.API.Capabilities) != 2 || manifest.API.Capabilities[0].PluginCallable || !manifest.API.Capabilities[1].PluginCallable {
+		t.Fatalf("api capabilities = %#v", manifest.API.Capabilities)
+	}
+	callable := manifest.API.PluginCallableCapabilities()
+	if len(callable) != 1 || callable[0].Name != "requests.create" {
+		t.Fatalf("callable plugin services = %#v", callable)
 	}
 	if manifest.UI == nil || len(manifest.UI.Routes) != 1 || len(manifest.UI.Actions) != 1 || manifest.UI.Routes[0].Menu == nil {
 		t.Fatalf("ui = %#v", manifest.UI)
@@ -220,15 +227,18 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "card data traversal source path", edit: func(m *Manifest) {
 			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", Data: &UICardData{Sources: []UICardSource{{Key: "a", Path: "/../other/x"}}}}}
 		}, want: ".. 段"},
-		{name: "plugin_services bad name", edit: func(m *Manifest) {
-			m.API.PluginServices = []PluginServiceExport{{Name: "bad name", Method: "GET", Path: "/x"}}
+		{name: "api capabilities bad name", edit: func(m *Manifest) {
+			m.API.Capabilities = []APIServiceCapability{{Name: "bad name", Method: "GET", Path: "/x"}}
 		}, want: "能力名"},
-		{name: "plugin_services bad method", edit: func(m *Manifest) {
-			m.API.PluginServices = []PluginServiceExport{{Name: "op", Method: "TRACE", Path: "/x"}}
-		}, want: "method"},
-		{name: "plugin_services bad path", edit: func(m *Manifest) {
-			m.API.PluginServices = []PluginServiceExport{{Name: "op", Method: "GET", Path: "x"}}
+		{name: "api capabilities bad path", edit: func(m *Manifest) {
+			m.API.Capabilities = []APIServiceCapability{{Name: "op", Method: "GET", Path: "x"}}
 		}, want: "path"},
+		{name: "api capabilities bad method", edit: func(m *Manifest) {
+			m.API.Capabilities = []APIServiceCapability{{Name: "op", Method: "TRACE", Path: "/x"}}
+		}, want: "method"},
+		{name: "api capabilities duplicate", edit: func(m *Manifest) {
+			m.API.Capabilities = []APIServiceCapability{{Name: "op", Method: "GET", Path: "/x"}, {Name: "op", Method: "POST", Path: "/y"}}
+		}, want: "重复"},
 	}
 
 	for _, tt := range tests {
