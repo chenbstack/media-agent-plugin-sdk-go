@@ -22,10 +22,12 @@ type Downloader struct {
 	connErr   error
 	nextState providers.DownloadState
 	transfer  providers.TransferInfo
+	limits    providers.SpeedLimitSettings
 }
 
 var _ providers.DownloaderProvider = (*Downloader)(nil)
 var _ providers.DownloaderTagProvider = (*Downloader)(nil)
+var _ providers.DownloaderSpeedLimitProvider = (*Downloader)(nil)
 
 func NewDownloader() *Downloader {
 	return &Downloader{
@@ -59,6 +61,28 @@ func (d *Downloader) TransferInfo(context.Context) (providers.TransferInfo, erro
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.transfer, d.connErr
+}
+
+func (d *Downloader) SpeedLimitSettings(context.Context) (providers.SpeedLimitSettings, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.limits, d.connErr
+}
+
+func (d *Downloader) SetSpeedLimitSettings(_ context.Context, values map[string]any) (providers.SpeedLimitSettings, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.connErr != nil {
+		return providers.SpeedLimitSettings{}, d.connErr
+	}
+	d.limits.Values = values
+	return d.limits, nil
+}
+
+func (d *Downloader) SetSpeedLimitDeclaration(groups []providers.SpeedLimitGroup, fields []providers.SpeedLimitField, values map[string]any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.limits = providers.SpeedLimitSettings{Groups: groups, Fields: fields, Values: values}
 }
 
 func (d *Downloader) Kind() string { return "fake" }

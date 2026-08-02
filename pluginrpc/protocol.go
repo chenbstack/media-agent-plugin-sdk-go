@@ -275,6 +275,11 @@ type DownloaderTagsRequest struct {
 	Tags     []string
 }
 
+type DownloaderSpeedLimitsRequest struct {
+	Instance InstancePayload
+	Values   map[string]any
+}
+
 type MediaServerItemsRequest struct {
 	Instance   InstancePayload
 	LibraryID  string
