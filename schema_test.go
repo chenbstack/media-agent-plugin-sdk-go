@@ -174,6 +174,23 @@ func TestValidateStorageInstanceFieldAcceptsAnyStorageID(t *testing.T) {
 	}
 }
 
+func TestValidateMediaServerConnectionFieldWithoutStaticOptions(t *testing.T) {
+	schema := ConfigSchema{Fields: []Field{{
+		Name: "emby_connection_id", Type: "select", Label: "Emby 连接", Required: true,
+		UI: &FieldUI{Browse: BrowseConnectionMediaServer + ".emby"},
+	}}}
+	if err := schema.validate("emby302"); err != nil {
+		t.Fatalf("宿主连接选择器不应要求静态 options: %v", err)
+	}
+	out, err := schema.Validate(map[string]any{"emby_connection_id": "media-server-1"})
+	if err != nil {
+		t.Fatalf("媒体服务器连接 id 应当被接受: %v", err)
+	}
+	if out["emby_connection_id"] != "media-server-1" {
+		t.Fatalf("归一化结果 = %+v", out)
+	}
+}
+
 // 撤掉一个配置项时，已装实例的配置里还留着它。不认的话 Validate 判「未声明的字段」，
 // 用户一打开设置页就是一片红，连保存都保存不了。
 func TestValidateRetiredField(t *testing.T) {

@@ -55,9 +55,24 @@ type Manifest struct {
 	Entitlements   []string                  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
 	Actions        []ActionDefinition        `yaml:"actions,omitempty" json:"actions,omitempty"`
 	ScheduledTasks []ScheduledTaskDefinition `yaml:"scheduled_tasks,omitempty" json:"scheduled_tasks,omitempty"`
+	HTTPServices   []HTTPServiceDefinition   `yaml:"http_services,omitempty" json:"http_services,omitempty"`
+	Artifacts      []ArtifactDefinition      `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
 	Permissions    Permissions               `yaml:"permissions" json:"permissions"`
 	Resources      Resources                 `yaml:"resources" json:"resources"`
 	Install        *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
+}
+
+// ArtifactDefinition declares a user-visible file produced by a plugin from an
+// imported media file. The host owns path derivation and persistence; plugins
+// only choose the destination storage through one of their config fields and
+// provide the content through a restricted host capability.
+type ArtifactDefinition struct {
+	ID                           string `yaml:"id" json:"id"`
+	Kind                         string `yaml:"kind" json:"kind"`
+	TargetStorageField           string `yaml:"target_storage_field" json:"target_storage_field"`
+	Extension                    string `yaml:"extension,omitempty" json:"extension,omitempty"`
+	MediaLibraryVisible          bool   `yaml:"media_library_visible,omitempty" json:"media_library_visible,omitempty"`
+	RequiredBeforeLibraryRefresh bool   `yaml:"required_before_library_refresh,omitempty" json:"required_before_library_refresh,omitempty"`
 }
 
 // OnboardingWorkflow lets a plugin own the operation performed after the host
@@ -514,6 +529,9 @@ type Instance struct {
 	// Mirrors 把 .strm 这类"在另一个存储里按原相对路径生成的替身文件"交给宿主落盘；
 	// 只在插件声明了 host 权限 "media.mirror.write" 时由宿主注入。
 	Mirrors MediaMirrors
+	// Playback 通过宿主已配置的存储 Provider 解析实时播放直链；只在插件声明了
+	// host 权限 "media.playback.resolve" 时由宿主注入。
+	Playback MediaPlayback
 	// Workspace 是宿主分配给本插件的私有工作目录，放解压产物、下载缓存这类只有插件
 	// 自己关心的文件；只在插件声明了 host 权限 "workspace.local" 时由宿主注入。
 	// 用户的媒体文件不在里面，也不该往里面放——那是 Sidecars / Mirrors 的事。
@@ -598,6 +616,7 @@ type Plugin struct {
 	NewIdentity             func(ctx context.Context, inst Instance, secrets SecretResolver) (IdentityProvider, error)
 	NewActionHandler        func(ctx context.Context, inst Instance, secrets SecretResolver) (ActionHandler, error)
 	NewScheduledTaskHandler func(ctx context.Context, inst Instance, secrets SecretResolver) (ScheduledTaskHandler, error)
+	NewHTTPService          func(ctx context.Context, inst Instance, secrets SecretResolver, name string) (HTTPService, error)
 	AssessOnboarding        func(ctx context.Context, inst Instance, secrets SecretResolver) (OnboardingAssessment, error)
 
 	// FieldOptions 为 dynamic_options 的 select 字段提供运行时选项
@@ -717,6 +736,48 @@ func (p Plugin) Validate() error {
 			return fmt.Errorf("插件 %s: event subscription %s 必须包含正数 version", m.ID, sub.Type)
 		}
 	}
+	seenArtifacts := map[string]struct{}{}
+	for _, artifact := range m.Artifacts {
+		if !manifestIdentifier.MatchString(artifact.ID) {
+			return fmt.Errorf("插件 %s: artifact id %q 格式无效", m.ID, artifact.ID)
+		}
+		if _, exists := seenArtifacts[artifact.ID]; exists {
+			return fmt.Errorf("插件 %s: artifact id 重复 %q", m.ID, artifact.ID)
+		}
+		seenArtifacts[artifact.ID] = struct{}{}
+		if artifact.Kind != "mirror" {
+			return fmt.Errorf("插件 %s: artifact %s 的 kind %q 不受支持", m.ID, artifact.ID, artifact.Kind)
+		}
+		if !manifestIdentifier.MatchString(artifact.TargetStorageField) {
+			return fmt.Errorf("插件 %s: artifact %s 的 target_storage_field %q 格式无效", m.ID, artifact.ID, artifact.TargetStorageField)
+		}
+		if artifact.Extension == "" || len(artifact.Extension) > 16 {
+			return fmt.Errorf("插件 %s: artifact %s 的 extension 无效", m.ID, artifact.ID)
+		}
+		for _, r := range artifact.Extension {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+				return fmt.Errorf("插件 %s: artifact %s 的 extension %q 无效", m.ID, artifact.ID, artifact.Extension)
+			}
+		}
+		if !m.Permissions.HasHost("media.mirror.write") {
+			return fmt.Errorf("插件 %s: 声明 mirror artifact 时必须包含 host 权限 media.mirror.write", m.ID)
+		}
+		if _, ok := p.ConfigSchema.Field(artifact.TargetStorageField); !ok {
+			return fmt.Errorf("插件 %s: artifact %s 引用的配置字段 %q 不存在", m.ID, artifact.ID, artifact.TargetStorageField)
+		}
+		if artifact.RequiredBeforeLibraryRefresh {
+			found := false
+			for _, sub := range m.Subscriptions {
+				if sub.Type == "library.refresh.pending" && sub.Version == 1 && (sub.Phase == "" || sub.Phase == "before") {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("插件 %s: artifact %s 要求刷新前生成，但未订阅 library.refresh.pending v1 before", m.ID, artifact.ID)
+			}
+		}
+	}
 	if err := m.validateExtensions(capabilities); err != nil {
 		return err
 	}
@@ -779,6 +840,41 @@ func (p Plugin) Validate() error {
 			if _, ok := capabilities["action.status"]; !ok {
 				return fmt.Errorf("插件 %s: 声明 onboarding.status_action 时必须包含 capability action.status", m.ID)
 			}
+		}
+	}
+	_, hasHTTPService := capabilities[CapabilityHTTPService]
+	if hasHTTPService && len(m.HTTPServices) == 0 {
+		return fmt.Errorf("插件 %s: capability %s 必须声明 http_services", m.ID, CapabilityHTTPService)
+	}
+	if len(m.HTTPServices) > 0 && !hasHTTPService {
+		return fmt.Errorf("插件 %s: 声明 http_services 时必须包含 capability %s", m.ID, CapabilityHTTPService)
+	}
+	seenHTTPServices := map[string]struct{}{}
+	for _, service := range m.HTTPServices {
+		if !manifestIdentifier.MatchString(service.Name) {
+			return fmt.Errorf("插件 %s: http service name %q 格式无效", m.ID, service.Name)
+		}
+		if _, exists := seenHTTPServices[service.Name]; exists {
+			return fmt.Errorf("插件 %s: http service name 重复 %q", m.ID, service.Name)
+		}
+		seenHTTPServices[service.Name] = struct{}{}
+		if !manifestIdentifier.MatchString(service.PublicHostConfigField) {
+			return fmt.Errorf("插件 %s: http service %s 的 public_host_config_field %q 格式无效", m.ID, service.Name, service.PublicHostConfigField)
+		}
+		if service.PathPrefix != "" && (service.PathPrefix == "/" || !strings.HasPrefix(service.PathPrefix, "/") || path.Clean(service.PathPrefix) != service.PathPrefix) {
+			return fmt.Errorf("插件 %s: http service %s 的 path_prefix %q 格式无效", m.ID, service.Name, service.PathPrefix)
+		}
+		seenMethods := map[string]struct{}{}
+		for _, method := range service.Methods {
+			switch method {
+			case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+			default:
+				return fmt.Errorf("插件 %s: http service %s 的 method %q 无效", m.ID, service.Name, method)
+			}
+			if _, exists := seenMethods[method]; exists {
+				return fmt.Errorf("插件 %s: http service %s 的 method 重复 %q", m.ID, service.Name, method)
+			}
+			seenMethods[method] = struct{}{}
 		}
 	}
 	return p.ConfigSchema.validate(m.ID)

@@ -111,6 +111,47 @@ func TestAssessOnboardingRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHTTPServiceLifecycleRoundTrip(t *testing.T) {
+	service := &recordingHTTPService{}
+	impl := pluginsdk.Plugin{
+		Manifest: pluginsdk.Manifest{
+			ID: "strm", Name: "STRM",
+			HTTPServices: []pluginsdk.HTTPServiceDefinition{{Name: "playback"}},
+		},
+		NewHTTPService: func(_ context.Context, inst pluginsdk.Instance, _ pluginsdk.SecretResolver, name string) (pluginsdk.HTTPService, error) {
+			if inst.ID != "global" || name != "playback" {
+				t.Fatalf("instance=%+v name=%q", inst, name)
+			}
+			return service, nil
+		},
+	}
+	server := rpc.NewServer()
+	if err := server.RegisterName("Plugin", &rpcServer{plugin: impl}); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	go server.ServeConn(serverConn)
+	client := &Client{client: rpc.NewClient(clientConn), manifest: impl.Manifest}
+	defer client.client.Close()
+
+	options := pluginsdk.HTTPServiceOptions{ListenHost: "127.0.0.1", BasePath: "/api/v1/play/redirect"}
+	info, err := client.HTTPServiceStartContext(t.Context(), pluginsdk.Instance{ID: "global"}, nil, "playback", options)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if info.BaseURL != "http://127.0.0.1:12345" || service.options != options {
+		t.Fatalf("info=%+v options=%+v", info, service.options)
+	}
+	if err := client.HTTPServiceStopContext(t.Context(), "playback"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if !service.stopped {
+		t.Fatal("HTTP service was not stopped")
+	}
+}
+
 type blockingRPCServer struct {
 	release <-chan struct{}
 }
@@ -118,6 +159,21 @@ type blockingRPCServer struct {
 type immediateRPCServer struct{}
 
 func (*immediateRPCServer) Ping(_ Empty, _ *Empty) error { return nil }
+
+type recordingHTTPService struct {
+	options pluginsdk.HTTPServiceOptions
+	stopped bool
+}
+
+func (s *recordingHTTPService) Start(_ context.Context, options pluginsdk.HTTPServiceOptions) (pluginsdk.HTTPServiceInfo, error) {
+	s.options = options
+	return pluginsdk.HTTPServiceInfo{BaseURL: "http://127.0.0.1:12345"}, nil
+}
+
+func (s *recordingHTTPService) Stop(context.Context) error {
+	s.stopped = true
+	return nil
+}
 
 type recordingActivityObserver struct {
 	started   PluginActivityStartInfo

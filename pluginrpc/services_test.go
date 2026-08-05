@@ -173,6 +173,23 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 	}
 }
 
+func TestHostServicesRequirePlaybackResolvePermission(t *testing.T) {
+	server := hostServicesServer{ctx: context.Background(), playback: memoryPlayback{}}
+	var reply JSONReply
+	input := PlaybackResolveRequest{Input: pluginsdk.PlaybackResolveInput{StorageID: "storage-115", Path: "/movie.mkv"}}
+	if err := server.ResolvePlaybackURL(input, &reply); err == nil {
+		t.Fatal("expected playback resolve without host permission to fail")
+	}
+	server.permissions.Host = []string{"media.playback.resolve"}
+	if err := server.ResolvePlaybackURL(input, &reply); err != nil {
+		t.Fatalf("ResolvePlaybackURL with permission: %v", err)
+	}
+	var result pluginsdk.PlaybackResolveResult
+	if err := decodeJSON(reply.Data, &result); err != nil || result.URL != "https://cdn.example/movie.mkv" {
+		t.Fatalf("result = %+v, err = %v", result, err)
+	}
+}
+
 func TestHostServicesRPCAcceptsMatchingLegacyStructShape(t *testing.T) {
 	server := rpc.NewServer()
 	target := &hostServicesServer{
@@ -264,6 +281,12 @@ func (memoryDownloads) FindDownloadByHash(context.Context, string) (pluginsdk.Ho
 }
 
 type memoryTransfers struct{}
+
+type memoryPlayback struct{}
+
+func (memoryPlayback) ResolvePlaybackURL(context.Context, pluginsdk.PlaybackResolveInput) (pluginsdk.PlaybackResolveResult, error) {
+	return pluginsdk.PlaybackResolveResult{URL: "https://cdn.example/movie.mkv"}, nil
+}
 
 func (memoryTransfers) UpsertTransfer(context.Context, pluginsdk.TransferWrite) (pluginsdk.HostWriteResult, error) {
 	return pluginsdk.HostWriteResult{TargetID: "transfer-1", Change: "created"}, nil

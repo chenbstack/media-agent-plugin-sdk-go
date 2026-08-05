@@ -212,6 +212,27 @@ func (c *Client) AssessOnboardingContext(ctx context.Context, inst pluginsdk.Ins
 	return result, nil
 }
 
+func (c *Client) HTTPServiceStartContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, name string, options pluginsdk.HTTPServiceOptions) (pluginsdk.HTTPServiceInfo, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.HTTPServiceInfo{}, err
+	}
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.HTTPServiceStart", HTTPServiceStartRequest{Instance: payload, Name: name, Options: options}, &reply); err != nil {
+		return pluginsdk.HTTPServiceInfo{}, err
+	}
+	var info pluginsdk.HTTPServiceInfo
+	if err := decodeJSON(reply.Data, &info); err != nil {
+		return pluginsdk.HTTPServiceInfo{}, err
+	}
+	return info, nil
+}
+
+func (c *Client) HTTPServiceStopContext(ctx context.Context, name string) error {
+	var reply Empty
+	return c.call(ctx, "Plugin.HTTPServiceStop", HTTPServiceStopRequest{Name: name}, &reply)
+}
+
 func (c *Client) CookieSourceTestContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) error {
 	payload, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
@@ -304,7 +325,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil || inst.SiteAccounts != nil ||
 		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil || inst.Connections != nil ||
 		inst.Storages != nil || inst.Schedules != nil || inst.Settings != nil || inst.PluginServices != nil ||
-		inst.Sidecars != nil || inst.Mirrors != nil {
+		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil {
 		id := c.broker.NextId()
 		payload.HostServicesBrokerID = id
 		go c.broker.AcceptAndServe(id, &hostServicesServer{
@@ -331,6 +352,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			pluginServices:    inst.PluginServices,
 			sidecars:          inst.Sidecars,
 			mirrors:           inst.Mirrors,
+			playback:          inst.Playback,
 		})
 	}
 	return payload, nil

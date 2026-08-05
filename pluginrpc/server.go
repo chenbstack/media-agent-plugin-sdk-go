@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/rpc"
 	"os"
+	"sync"
 
 	hcplugin "github.com/hashicorp/go-plugin"
 
@@ -17,8 +18,15 @@ import (
 )
 
 type rpcServer struct {
-	plugin pluginsdk.Plugin
-	broker *hcplugin.MuxBroker
+	plugin       pluginsdk.Plugin
+	broker       *hcplugin.MuxBroker
+	httpMu       sync.Mutex
+	httpServices map[string]runningHTTPService
+}
+
+type runningHTTPService struct {
+	service           pluginsdk.HTTPService
+	closeHostServices func()
 }
 
 func (s *rpcServer) Manifest(args Empty, reply *JSONReply) error {
@@ -269,6 +277,70 @@ func (s *rpcServer) AssessOnboarding(req InstancePayload, reply *JSONReply) erro
 	}
 	*reply = out
 	return nil
+}
+
+func (s *rpcServer) HTTPServiceStart(req HTTPServiceStartRequest, reply *JSONReply) error {
+	if s.plugin.NewHTTPService == nil {
+		return fmt.Errorf("插件未实现 HTTP service")
+	}
+	declared := false
+	for _, service := range s.plugin.Manifest.HTTPServices {
+		if service.Name == req.Name {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return fmt.Errorf("插件未声明 HTTP service %q", req.Name)
+	}
+	inst, secrets, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	service, err := s.plugin.NewHTTPService(context.Background(), inst, secrets, req.Name)
+	if err != nil {
+		closeFn()
+		return err
+	}
+	s.httpMu.Lock()
+	defer s.httpMu.Unlock()
+	if s.httpServices == nil {
+		s.httpServices = map[string]runningHTTPService{}
+	}
+	if _, exists := s.httpServices[req.Name]; exists {
+		closeFn()
+		return fmt.Errorf("HTTP service %s 已启动", req.Name)
+	}
+	info, err := service.Start(context.Background(), req.Options)
+	if err != nil {
+		closeFn()
+		return err
+	}
+	s.httpServices[req.Name] = runningHTTPService{service: service, closeHostServices: closeFn}
+	out, err := encodeJSON(info)
+	if err != nil {
+		_ = service.Stop(context.Background())
+		delete(s.httpServices, req.Name)
+		closeFn()
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *rpcServer) HTTPServiceStop(req HTTPServiceStopRequest, _ *Empty) error {
+	s.httpMu.Lock()
+	running, exists := s.httpServices[req.Name]
+	if exists {
+		delete(s.httpServices, req.Name)
+	}
+	s.httpMu.Unlock()
+	if !exists {
+		return nil
+	}
+	err := running.service.Stop(context.Background())
+	running.closeHostServices()
+	return err
 }
 
 func (s *rpcServer) RendererTest(req InstancePayload, reply *Empty) error {
@@ -692,6 +764,7 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		inst.PluginServices = services
 		inst.Sidecars = services
 		inst.Mirrors = services
+		inst.Playback = services
 	}
 	closeFn := func() {}
 	if services != nil {
