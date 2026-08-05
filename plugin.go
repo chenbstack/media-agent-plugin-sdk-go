@@ -858,7 +858,7 @@ func (p Plugin) Validate() error {
 			return fmt.Errorf("插件 %s: http service name 重复 %q", m.ID, service.Name)
 		}
 		seenHTTPServices[service.Name] = struct{}{}
-		if !manifestIdentifier.MatchString(service.PublicHostConfigField) {
+		if service.PublicHostConfigField != "" && !manifestIdentifier.MatchString(service.PublicHostConfigField) {
 			return fmt.Errorf("插件 %s: http service %s 的 public_host_config_field %q 格式无效", m.ID, service.Name, service.PublicHostConfigField)
 		}
 		if service.PathPrefix != "" && (service.PathPrefix == "/" || !strings.HasPrefix(service.PathPrefix, "/") || path.Clean(service.PathPrefix) != service.PathPrefix) {

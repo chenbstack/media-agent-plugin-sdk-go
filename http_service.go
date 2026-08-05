@@ -1,12 +1,25 @@
 package pluginsdk
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 const CapabilityHTTPService = "service.http"
 
+// DefaultHTTPServicePathPrefix is the namespace used for plugin-owned HTTP
+// services that do not declare an explicit path_prefix.
+const DefaultHTTPServicePathPrefix = "/api/v1/plugins"
+
+// DefaultHTTPServicePath returns the Host-managed route for a plugin service.
+func DefaultHTTPServicePath(pluginID, serviceName string) string {
+	return strings.TrimRight(DefaultHTTPServicePathPrefix, "/") + "/" + strings.Trim(pluginID, "/") + "/" + strings.Trim(serviceName, "/")
+}
+
 // HTTPServiceDefinition declares a long-lived HTTP data plane owned by a
-// plugin. The host matches PublicHostConfigField against the request Host and,
-// when PathPrefix is set, only proxies requests under that path to the plugin.
+// plugin. A non-empty PublicHostConfigField routes on that configured Host;
+// when it is empty, the service is available on the Host's current entrypoint.
+// An empty PathPrefix receives a stable Host-managed plugin/service prefix.
 type HTTPServiceDefinition struct {
 	Name                  string   `yaml:"name" json:"name"`
 	PublicHostConfigField string   `yaml:"public_host_config_field" json:"public_host_config_field"`
