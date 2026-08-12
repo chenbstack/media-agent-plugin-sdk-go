@@ -15,8 +15,8 @@ func TestDomainCapabilitiesRoundTripRPC(t *testing.T) {
 	resources := memoryResources{}
 	server := rpc.NewServer()
 	target := &hostServicesServer{
-		ctx: context.Background(), connections: resources, storages: resources, schedules: resources, settings: resources,
-		permissions: pluginsdk.Permissions{Host: []string{"connections.read", "connections.write", "storages.read", "storages.write", "schedules.read", "schedules.write", "settings.read", "settings.write"}},
+		ctx: context.Background(), connections: resources, connectionCredentials: resources, storages: resources, schedules: resources, settings: resources,
+		permissions: pluginsdk.Permissions{Host: []string{"connections.read", "connections.write", "connections.credentials.read", "storages.read", "storages.write", "schedules.read", "schedules.write", "settings.read", "settings.write"}},
 	}
 	if err := server.RegisterName("Plugin", target); err != nil {
 		t.Fatal(err)
@@ -32,6 +32,10 @@ func TestDomainCapabilitiesRoundTripRPC(t *testing.T) {
 	connections, err := client.ListConnections(t.Context(), "downloaders")
 	if err != nil || len(connections) != 1 || connections[0].ID != "connection-1" {
 		t.Fatalf("ListConnections = %+v, %v", connections, err)
+	}
+	credential, err := client.RevealConnectionCredential(t.Context(), "media_servers", "connection-1", "api_key", "test")
+	if err != nil || credential != "connection-secret" {
+		t.Fatalf("RevealConnectionCredential = %q, %v", credential, err)
 	}
 	storages, err := client.ListStorages(t.Context())
 	if err != nil || len(storages) != 1 || storages[0].ID != "storage-1" {
@@ -170,6 +174,19 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 	}
 	if err := server.ListSchedules(Empty{}, &writeReply); err != nil {
 		t.Fatalf("ListSchedules with permission: %v", err)
+	}
+}
+
+func TestHostServicesRequireConnectionCredentialPermission(t *testing.T) {
+	server := hostServicesServer{ctx: context.Background(), connectionCredentials: memoryResources{}}
+	var reply StringReply
+	request := ConnectionCredentialRequest{Section: "media_servers", ID: "connection-1", Field: "api_key", Reason: "test"}
+	if err := server.RevealConnectionCredential(request, &reply); err == nil {
+		t.Fatal("expected credential reveal without host permission to fail")
+	}
+	server.permissions.Host = []string{"connections.credentials.read"}
+	if err := server.RevealConnectionCredential(request, &reply); err != nil || reply.Value != "connection-secret" {
+		t.Fatalf("credential reveal = %q, %v", reply.Value, err)
 	}
 }
 
@@ -317,6 +334,9 @@ func (memoryResources) ListConnections(context.Context, string) ([]pluginsdk.Con
 }
 func (memoryResources) GetConnection(context.Context, string, string) (pluginsdk.Connection, error) {
 	return pluginsdk.Connection{}, nil
+}
+func (memoryResources) RevealConnectionCredential(context.Context, string, string, string, string) (string, error) {
+	return "connection-secret", nil
 }
 func (memoryResources) UpsertConnection(context.Context, pluginsdk.ConnectionWrite) (pluginsdk.HostWriteResult, error) {
 	return pluginsdk.HostWriteResult{TargetID: "connection-1", Change: "created"}, nil

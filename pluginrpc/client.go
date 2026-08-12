@@ -323,37 +323,38 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 		WorkspaceDir: inst.Workspace.Root(),
 	}
 	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil || inst.SiteAccounts != nil ||
-		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil || inst.Connections != nil ||
+		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil ||
 		inst.Storages != nil || inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
 		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil {
 		id := c.broker.NextId()
 		payload.HostServicesBrokerID = id
 		go c.broker.AcceptAndServe(id, &hostServicesServer{
-			ctx:               ctx,
-			pluginID:          c.manifest.ID,
-			scopeType:         c.scopeType,
-			scopeID:           c.scopeID,
-			manifest:          c.manifest,
-			permissions:       c.permissions,
-			permissionChecker: c.permissionChecker,
-			secrets:           secrets,
-			kv:                inst.KV,
-			db:                inst.DB,
-			logger:            inst.Logger,
-			siteAccounts:      inst.SiteAccounts,
-			subscriptions:     inst.Subscriptions,
-			downloads:         inst.Downloads,
-			transfers:         inst.Transfers,
-			rules:             inst.Rules,
-			connections:       inst.Connections,
-			storages:          inst.Storages,
-			schedules:         inst.Schedules,
-			settings:          inst.Settings,
-			entitlements:      inst.Entitlements,
-			pluginServices:    inst.PluginServices,
-			sidecars:          inst.Sidecars,
-			mirrors:           inst.Mirrors,
-			playback:          inst.Playback,
+			ctx:                   ctx,
+			pluginID:              c.manifest.ID,
+			scopeType:             c.scopeType,
+			scopeID:               c.scopeID,
+			manifest:              c.manifest,
+			permissions:           c.permissions,
+			permissionChecker:     c.permissionChecker,
+			secrets:               secrets,
+			kv:                    inst.KV,
+			db:                    inst.DB,
+			logger:                inst.Logger,
+			siteAccounts:          inst.SiteAccounts,
+			subscriptions:         inst.Subscriptions,
+			downloads:             inst.Downloads,
+			transfers:             inst.Transfers,
+			rules:                 inst.Rules,
+			connections:           inst.Connections,
+			connectionCredentials: inst.ConnectionCredentials,
+			storages:              inst.Storages,
+			schedules:             inst.Schedules,
+			settings:              inst.Settings,
+			entitlements:          inst.Entitlements,
+			pluginServices:        inst.PluginServices,
+			sidecars:              inst.Sidecars,
+			mirrors:               inst.Mirrors,
+			playback:              inst.Playback,
 		})
 	}
 	return payload, nil

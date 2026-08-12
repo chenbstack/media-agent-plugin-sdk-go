@@ -34,3 +34,11 @@ type Connections interface {
 	GetConnection(context.Context, string, string) (Connection, error)
 	UpsertConnection(context.Context, ConnectionWrite) (HostWriteResult, error)
 }
+
+// ConnectionCredentials exposes one explicitly named secret from an existing
+// host connection. The host validates that the requested field is declared as
+// secret by the connection provider and audits every reveal. Plugins only
+// receive this capability when connections.credentials.read is granted.
+type ConnectionCredentials interface {
+	RevealConnectionCredential(ctx context.Context, section, id, field, reason string) (string, error)
+}

@@ -8,10 +8,13 @@ import (
 const CapabilityHTTPService = "service.http"
 
 // DefaultHTTPServicePathPrefix is the namespace used for plugin-owned HTTP
-// services that do not declare an explicit path_prefix.
+// services that do not declare an explicit path_prefix. The Host appends the
+// plugin and service IDs to keep the route stable and collision-resistant.
 const DefaultHTTPServicePathPrefix = "/api/v1/plugins"
 
 // DefaultHTTPServicePath returns the Host-managed route for a plugin service.
+// Manifest IDs are validated before this helper is used; trimming here keeps
+// callers from accidentally creating a double slash in diagnostics/tests.
 func DefaultHTTPServicePath(pluginID, serviceName string) string {
 	return strings.TrimRight(DefaultHTTPServicePathPrefix, "/") + "/" + strings.Trim(pluginID, "/") + "/" + strings.Trim(serviceName, "/")
 }

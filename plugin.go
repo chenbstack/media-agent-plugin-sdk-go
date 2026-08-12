@@ -524,8 +524,11 @@ type Instance struct {
 	Transfers     Transfers
 	Rules         Rules
 	Connections   Connections
-	Storages      Storages
-	Schedules     Schedules
+	// ConnectionCredentials reveals a provider-declared secret from an existing
+	// connection after a separate high-risk host permission check.
+	ConnectionCredentials ConnectionCredentials
+	Storages              Storages
+	Schedules             Schedules
 	// PluginServices 经宿主 broker 调用其他插件的业务 API；只在插件声明了
 	// host 权限 "plugin_service.<provider>/<service>" 时由宿主注入。
 	PluginServices PluginServices

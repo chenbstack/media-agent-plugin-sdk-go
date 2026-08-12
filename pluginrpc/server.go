@@ -758,6 +758,7 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		inst.Transfers = services
 		inst.Rules = services
 		inst.Connections = services
+		inst.ConnectionCredentials = services
 		inst.Storages = services
 		inst.Schedules = services
 		inst.Settings = services

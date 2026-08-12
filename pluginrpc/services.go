@@ -14,31 +14,32 @@ import (
 )
 
 type hostServicesServer struct {
-	ctx               context.Context
-	pluginID          string
-	scopeType         string
-	scopeID           string
-	manifest          pluginsdk.Manifest
-	permissions       pluginsdk.Permissions
-	permissionChecker PermissionChecker
-	secrets           pluginsdk.SecretResolver
-	kv                pluginsdk.KVStore
-	db                pluginsdk.PluginDB
-	logger            pluginsdk.Logger
-	siteAccounts      pluginsdk.SiteAccounts
-	subscriptions     pluginsdk.Subscriptions
-	downloads         pluginsdk.Downloads
-	transfers         pluginsdk.Transfers
-	rules             pluginsdk.Rules
-	connections       pluginsdk.Connections
-	storages          pluginsdk.Storages
-	schedules         pluginsdk.Schedules
-	settings          pluginsdk.Settings
-	entitlements      pluginsdk.Entitlements
-	pluginServices    pluginsdk.PluginServices
-	sidecars          pluginsdk.MediaSidecars
-	mirrors           pluginsdk.MediaMirrors
-	playback          pluginsdk.MediaPlayback
+	ctx                   context.Context
+	pluginID              string
+	scopeType             string
+	scopeID               string
+	manifest              pluginsdk.Manifest
+	permissions           pluginsdk.Permissions
+	permissionChecker     PermissionChecker
+	secrets               pluginsdk.SecretResolver
+	kv                    pluginsdk.KVStore
+	db                    pluginsdk.PluginDB
+	logger                pluginsdk.Logger
+	siteAccounts          pluginsdk.SiteAccounts
+	subscriptions         pluginsdk.Subscriptions
+	downloads             pluginsdk.Downloads
+	transfers             pluginsdk.Transfers
+	rules                 pluginsdk.Rules
+	connections           pluginsdk.Connections
+	connectionCredentials pluginsdk.ConnectionCredentials
+	storages              pluginsdk.Storages
+	schedules             pluginsdk.Schedules
+	settings              pluginsdk.Settings
+	entitlements          pluginsdk.Entitlements
+	pluginServices        pluginsdk.PluginServices
+	sidecars              pluginsdk.MediaSidecars
+	mirrors               pluginsdk.MediaMirrors
+	playback              pluginsdk.MediaPlayback
 }
 
 type EntitlementCheckRequest struct{ Feature string }
@@ -233,6 +234,7 @@ type RuleDefaultSetRequest struct {
 
 type ConnectionListRequest struct{ Section string }
 type ConnectionGetRequest struct{ Section, ID string }
+type ConnectionCredentialRequest struct{ Section, ID, Field, Reason string }
 type ConnectionUpsertRequest struct{ Input pluginsdk.ConnectionWrite }
 type StorageGetRequest struct{ ID string }
 type StorageUpsertRequest struct{ Input pluginsdk.StorageWrite }
@@ -299,6 +301,21 @@ func (s *hostServicesServer) GetConnection(req ConnectionGetRequest, reply *JSON
 		*reply = out
 	}
 	return err
+}
+
+func (s *hostServicesServer) RevealConnectionCredential(req ConnectionCredentialRequest, reply *StringReply) error {
+	if s.connectionCredentials == nil {
+		return fmt.Errorf("宿主未提供连接凭据读取能力")
+	}
+	if err := s.requireHostPermission("connections.credentials.read"); err != nil {
+		return err
+	}
+	value, err := s.connectionCredentials.RevealConnectionCredential(s.ctx, req.Section, req.ID, req.Field, req.Reason)
+	if err != nil {
+		return err
+	}
+	reply.Value = value
+	return nil
 }
 
 func (s *hostServicesServer) UpsertConnection(req ConnectionUpsertRequest, reply *JSONReply) error {
@@ -1117,6 +1134,13 @@ func (c *hostServicesClient) GetConnection(_ context.Context, section, id string
 	}
 	var result pluginsdk.Connection
 	return result, decodeJSON(reply.Data, &result)
+}
+func (c *hostServicesClient) RevealConnectionCredential(_ context.Context, section, id, field, reason string) (string, error) {
+	var reply StringReply
+	if err := c.client.Call("Plugin.RevealConnectionCredential", ConnectionCredentialRequest{Section: section, ID: id, Field: field, Reason: reason}, &reply); err != nil {
+		return "", err
+	}
+	return reply.Value, nil
 }
 func (c *hostServicesClient) UpsertConnection(_ context.Context, input pluginsdk.ConnectionWrite) (pluginsdk.HostWriteResult, error) {
 	return c.hostWriteCall("Plugin.UpsertConnection", ConnectionUpsertRequest{Input: input})
