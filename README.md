@@ -91,6 +91,31 @@ Plugins may instead select a host-registered workflow with
 `executor.kind: host_workflow`. Workflow names are allowlisted by the host;
 declaring one does not grant direct host-data access.
 
+## Membership-gated plugins
+
+A plugin that requires the existing Pro membership declares the generic level
+in its manifest instead of asking the host to recognize its plugin ID:
+
+```yaml
+required_membership: pro
+entitlements: [membership.pro]
+```
+
+The host uses `required_membership` for store, install, and load gating. The
+plugin must also check the current grant at every paid operation because a
+license can expire after the process has started:
+
+```go
+if inst.Entitlements == nil ||
+    !inst.Entitlements.HasEntitlement(ctx, pluginsdk.EntitlementMembershipPro) {
+    return errors.New("active Pro membership required")
+}
+```
+
+External plugins receive this checker through the host-services RPC bridge. A
+missing checker, RPC failure, or false result is a denial. The API intentionally
+does not expose activation codes or the full commercial-license snapshot.
+
 ## Domain migration capabilities
 
 Migration plugins use the same domain-oriented pattern as `Rules`:

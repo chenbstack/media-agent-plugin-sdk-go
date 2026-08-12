@@ -15,6 +15,9 @@ import "context"
 // 插件自己拼路径 os.WriteFile 的老写法有两处错：对网络存储（smb://）根本不成立，
 // 在容器里又跑在与用户配置无关的沙箱 uid 上，写用户的目录只会拿到 permission denied。
 type MirrorWrite struct {
+	// ArtifactID 必须匹配插件 manifest.artifacts[] 里声明的 id。宿主用它把生成结果
+	// 归到对应 artifact，并据声明决定是否作为媒体库刷新目标。
+	ArtifactID string `json:"artifact_id"`
 	// FileRef 来自事件 payload 的 files[].file_ref，不要自己拼。
 	FileRef string `json:"file_ref"`
 	// TargetStorageID 是替身文件要落进的存储实例 id，来自插件配置里的存储选择器。

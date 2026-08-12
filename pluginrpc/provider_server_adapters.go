@@ -106,6 +106,34 @@ func (s *rpcServer) DownloaderTransferInfo(req InstancePayload, reply *JSONReply
 	return setJSONReply(reply, value, callErr)
 }
 
+func (s *rpcServer) DownloaderSpeedLimitSettings(req InstancePayload, reply *JSONReply) error {
+	p, closeFn, err := s.downloader(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	limiter, ok := p.(providers.DownloaderSpeedLimitProvider)
+	if !ok {
+		return fmt.Errorf("%w: %s", providers.ErrDownloaderSpeedLimitsUnsupported, p.Kind())
+	}
+	value, callErr := limiter.SpeedLimitSettings(context.Background())
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) DownloaderSetSpeedLimitSettings(req DownloaderSpeedLimitsRequest, reply *JSONReply) error {
+	p, closeFn, err := s.downloader(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	limiter, ok := p.(providers.DownloaderSpeedLimitProvider)
+	if !ok {
+		return fmt.Errorf("%w: %s", providers.ErrDownloaderSpeedLimitsUnsupported, p.Kind())
+	}
+	value, callErr := limiter.SetSpeedLimitSettings(context.Background(), req.Values)
+	return setJSONReply(reply, value, callErr)
+}
+
 func (s *rpcServer) MediaServerTest(req InstancePayload, _ *Empty) error {
 	p, closeFn, err := s.mediaServer(req)
 	if err != nil {

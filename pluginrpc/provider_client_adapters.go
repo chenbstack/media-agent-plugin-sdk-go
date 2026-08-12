@@ -137,6 +137,7 @@ type downloaderProvider struct {
 
 var _ providers.DownloaderProvider = (*downloaderProvider)(nil)
 var _ providers.DownloaderTagProvider = (*downloaderProvider)(nil)
+var _ providers.DownloaderSpeedLimitProvider = (*downloaderProvider)(nil)
 
 func (p *downloaderProvider) Kind() string { return p.session.pluginID() }
 
@@ -209,6 +210,36 @@ func (p *downloaderProvider) TransferInfo(ctx context.Context) (providers.Transf
 	var out providers.TransferInfo
 	err := p.call(ctx, "downloader.transfer_info", "Plugin.DownloaderTransferInfo", &out)
 	return out, err
+}
+
+func (p *downloaderProvider) SpeedLimitSettings(ctx context.Context) (providers.SpeedLimitSettings, error) {
+	var out providers.SpeedLimitSettings
+	err := p.call(ctx, "downloader.speed_limit_settings", "Plugin.DownloaderSpeedLimitSettings", &out)
+	return out, normalizeSpeedLimitsUnsupported(err)
+}
+
+func (p *downloaderProvider) SetSpeedLimitSettings(ctx context.Context, values map[string]any) (providers.SpeedLimitSettings, error) {
+	var out providers.SpeedLimitSettings
+	err := p.withPayload(ctx, "downloader.set_speed_limit_settings", func(c *Client, instance InstancePayload) error {
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.DownloaderSetSpeedLimitSettings", DownloaderSpeedLimitsRequest{Instance: instance, Values: values}, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, normalizeSpeedLimitsUnsupported(err)
+}
+
+func normalizeSpeedLimitsUnsupported(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "can't find method") || strings.Contains(message, "method not found") ||
+		strings.Contains(message, providers.ErrDownloaderSpeedLimitsUnsupported.Error()) {
+		return providers.ErrDownloaderSpeedLimitsUnsupported
+	}
+	return err
 }
 
 func (p *downloaderProvider) call(ctx context.Context, operation, method string, out any) error {

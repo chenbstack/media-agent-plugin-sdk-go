@@ -80,6 +80,10 @@ type FieldUI struct {
 // 填一个下拉框去要 storages.read。取值同理无法在 schema 里穷举，见 optionAllows。
 const BrowseStorageInstance = "storage.instance"
 
+// BrowseConnectionMediaServer 让 select 字段引用宿主已有的媒体服务器连接；追加
+// ".<kind>"（例如 connection.media_server.emby）可由界面按连接类型过滤。
+const BrowseConnectionMediaServer = "connection.media_server"
+
 type Option struct {
 	Value string `json:"value"`
 	Label string `json:"label"`
@@ -120,7 +124,7 @@ func (s ConfigSchema) validate(pluginID string) error {
 			}
 			continue
 		}
-		if (f.Type == "select" || f.Type == "multiselect") && len(f.Options) == 0 {
+		if (f.Type == "select" || f.Type == "multiselect") && len(f.Options) == 0 && !f.optionsFilledByHost() {
 			return fmt.Errorf("插件 %s: %s 字段 %s 必须有 options", pluginID, f.Type, f.Name)
 		}
 		if f.Secret && f.Type != "password" && f.Type != "string" {
@@ -348,7 +352,12 @@ func (f Field) optionAllows(value string) bool {
 
 // optionsFilledByHost 表示候选项来自宿主界面而非 schema 声明。
 func (f Field) optionsFilledByHost() bool {
-	return f.UI != nil && f.UI.Browse == BrowseStorageInstance
+	if f.UI == nil {
+		return false
+	}
+	return f.UI.Browse == BrowseStorageInstance ||
+		f.UI.Browse == BrowseConnectionMediaServer ||
+		strings.HasPrefix(f.UI.Browse, BrowseConnectionMediaServer+".")
 }
 
 // stringList 把 multiselect 的取值归一成字符串切片。

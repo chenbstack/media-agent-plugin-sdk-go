@@ -232,6 +232,62 @@ type DownloaderTagProvider interface {
 
 var ErrDownloaderTagsUnsupported = errors.New("downloader tags unsupported")
 
+// DownloaderSpeedLimitProvider is an optional downloader capability for live,
+// plugin-declared rate-limit settings. Speed fields always use bytes/s and zero
+// means unlimited. Implementations must not persist a second copy in host or
+// plugin storage.
+type DownloaderSpeedLimitProvider interface {
+	SpeedLimitSettings(ctx context.Context) (SpeedLimitSettings, error)
+	SetSpeedLimitSettings(ctx context.Context, values map[string]any) (SpeedLimitSettings, error)
+}
+
+var ErrDownloaderSpeedLimitsUnsupported = errors.New("downloader speed limits unsupported")
+
+type SpeedLimitFieldType string
+type SpeedLimitFieldComponent string
+
+const (
+	SpeedLimitFieldNumber  SpeedLimitFieldType = "number"
+	SpeedLimitFieldBoolean SpeedLimitFieldType = "boolean"
+
+	SpeedLimitComponentInput  SpeedLimitFieldComponent = "input"
+	SpeedLimitComponentSwitch SpeedLimitFieldComponent = "switch"
+)
+
+type SpeedLimitGroup struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type SpeedLimitField struct {
+	Name                    string                        `json:"name"`
+	Component               SpeedLimitFieldComponent      `json:"component"`
+	Type                    SpeedLimitFieldType           `json:"type"`
+	Label                   string                        `json:"label"`
+	Group                   string                        `json:"group,omitempty"`
+	Help                    string                        `json:"help,omitempty"`
+	InputSuffixOptions      []SpeedLimitInputSuffixOption `json:"input_suffix_options,omitempty"`
+	DefaultInputSuffixValue int64                         `json:"default_input_suffix_value,omitempty"`
+}
+
+// SpeedLimitInputSuffixOption describes one plugin-owned trailing select item
+// for an input. Value is the multiplier from the displayed number to the
+// canonical value passed through Values (for example KB/s=1024).
+type SpeedLimitInputSuffixOption struct {
+	Label string `json:"label"`
+	Value int64  `json:"value"`
+}
+
+// SpeedLimitSettings combines the plugin-owned form declaration with a live
+// downloader value snapshot. Values for number fields are canonical int64
+// values interpreted using their input suffix option multiplier; boolean fields
+// use bool.
+type SpeedLimitSettings struct {
+	Groups []SpeedLimitGroup `json:"groups"`
+	Fields []SpeedLimitField `json:"fields"`
+	Values map[string]any    `json:"values"`
+}
+
 // TransferInfo 是下载器全局传输状态快照。
 type TransferInfo struct {
 	DownloadSpeed int64 // bytes/s

@@ -152,6 +152,29 @@ func TestManifestExtensionsRemainOptionalForLegacyPlugins(t *testing.T) {
 	}
 }
 
+func TestManifestRequiredMembership(t *testing.T) {
+	manifest, err := ParseManifest([]byte(`
+id: pro-only
+name: Pro Only
+version: 1.0.0
+type: cli
+required_membership: pro
+capabilities: [test.capability]
+permissions: {network: [], secrets: []}
+resources: {memory_limit_mb: 32, idle_timeout_seconds: 60}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.RequiredMembership != MembershipPro {
+		t.Fatalf("required_membership = %q", manifest.RequiredMembership)
+	}
+	manifest.RequiredMembership = "enterprise"
+	if err := (Plugin{Manifest: manifest}).Validate(); err == nil || !strings.Contains(err.Error(), "只支持 pro") {
+		t.Fatalf("invalid required_membership error = %v", err)
+	}
+}
+
 func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *testing.T) {
 	valid := Manifest{
 		ID: "family", Name: "Family", Version: "1", Type: "builtin",

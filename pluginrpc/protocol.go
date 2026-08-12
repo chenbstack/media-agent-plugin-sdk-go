@@ -196,6 +196,16 @@ type ScheduledTaskRunRequest struct {
 	RequestJSON []byte
 }
 
+type HTTPServiceStartRequest struct {
+	Instance InstancePayload
+	Name     string
+	Options  pluginsdk.HTTPServiceOptions
+}
+
+type HTTPServiceStopRequest struct {
+	Name string
+}
+
 type StoragePathRequest struct {
 	Instance InstancePayload
 	Path     string
@@ -273,6 +283,11 @@ type DownloaderTagsRequest struct {
 	Instance InstancePayload
 	Hash     string
 	Tags     []string
+}
+
+type DownloaderSpeedLimitsRequest struct {
+	Instance InstancePayload
+	Values   map[string]any
 }
 
 type MediaServerItemsRequest struct {
@@ -1017,6 +1032,11 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 			return &scheduledTaskHandler{external: e, inst: inst, secrets: secrets}, nil
 		}
 	}
+	if out.HasExactCapability(pluginsdk.CapabilityHTTPService) && len(out.Manifest.HTTPServices) > 0 {
+		out.NewHTTPService = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, name string) (pluginsdk.HTTPService, error) {
+			return &externalHTTPService{external: e, inst: inst, secrets: secrets, name: name}, nil
+		}
+	}
 	if out.HasExactCapability(pluginsdk.CapabilityOnboardingAssessment) {
 		out.AssessOnboarding = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.OnboardingAssessment, error) {
 			var result pluginsdk.OnboardingAssessment
@@ -1052,6 +1072,47 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 		}
 	}
 	return out
+}
+
+type externalHTTPService struct {
+	mu       sync.Mutex
+	external ExternalPlugin
+	inst     pluginsdk.Instance
+	secrets  pluginsdk.SecretResolver
+	name     string
+	running  *runningClient
+}
+
+func (s *externalHTTPService) Start(ctx context.Context, options pluginsdk.HTTPServiceOptions) (pluginsdk.HTTPServiceInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running != nil {
+		return pluginsdk.HTTPServiceInfo{}, fmt.Errorf("HTTP service %s 已启动", s.name)
+	}
+	running, err := s.external.startClientForScopeOperation(ctx, "plugin", "global", "service.http."+s.name)
+	if err != nil {
+		return pluginsdk.HTTPServiceInfo{}, err
+	}
+	info, err := running.client.HTTPServiceStartContext(ctx, s.inst, s.secrets, s.name, options)
+	if err != nil {
+		running.Close()
+		return pluginsdk.HTTPServiceInfo{}, err
+	}
+	s.running = running
+	return info, nil
+}
+
+func (s *externalHTTPService) Stop(ctx context.Context) error {
+	s.mu.Lock()
+	running := s.running
+	s.running = nil
+	s.mu.Unlock()
+	if running == nil {
+		return nil
+	}
+	err := running.client.HTTPServiceStopContext(ctx, s.name)
+	running.Close()
+	return err
 }
 
 func hasPluginHandlerScheduledTask(tasks []pluginsdk.ScheduledTaskDefinition) bool {

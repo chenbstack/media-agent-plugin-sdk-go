@@ -34,9 +34,23 @@ type hostServicesServer struct {
 	storages          pluginsdk.Storages
 	schedules         pluginsdk.Schedules
 	settings          pluginsdk.Settings
+	entitlements      pluginsdk.Entitlements
 	pluginServices    pluginsdk.PluginServices
 	sidecars          pluginsdk.MediaSidecars
 	mirrors           pluginsdk.MediaMirrors
+	playback          pluginsdk.MediaPlayback
+}
+
+type EntitlementCheckRequest struct{ Feature string }
+type EntitlementCheckReply struct{ Granted bool }
+
+func (s *hostServicesServer) HasEntitlement(req EntitlementCheckRequest, reply *EntitlementCheckReply) error {
+	if s.entitlements == nil {
+		reply.Granted = false
+		return nil
+	}
+	reply.Granted = s.entitlements.HasEntitlement(s.ctx, strings.TrimSpace(req.Feature))
+	return nil
 }
 
 type RevealRequest struct {
@@ -532,6 +546,28 @@ type MirrorWriteRequest struct {
 	Input pluginsdk.MirrorWrite
 }
 
+type PlaybackResolveRequest struct {
+	Input pluginsdk.PlaybackResolveInput
+}
+
+func (s *hostServicesServer) ResolvePlaybackURL(req PlaybackResolveRequest, reply *JSONReply) error {
+	if s.playback == nil {
+		return fmt.Errorf("宿主未提供 MediaPlayback")
+	}
+	if err := s.requireHostPermission("media.playback.resolve"); err != nil {
+		return err
+	}
+	result, err := s.playback.ResolvePlaybackURL(s.ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
 // WriteMirror 和 WriteSubtitle 一样只收 FileRef 不收路径：目标存储由用户的插件配置
 // 决定，存储内的相对路径由宿主从 FileRef 推导，插件指不了目录也走不出去。
 func (s *hostServicesServer) WriteMirror(req MirrorWriteRequest, reply *JSONReply) error {
@@ -820,6 +856,11 @@ func (c *hostServicesClient) Close() error {
 	return c.client.Close()
 }
 
+func (c *hostServicesClient) HasEntitlement(_ context.Context, feature string) bool {
+	var reply EntitlementCheckReply
+	return c.client.Call("Plugin.HasEntitlement", EntitlementCheckRequest{Feature: feature}, &reply) == nil && reply.Granted
+}
+
 func (c *hostServicesClient) Reveal(ctx context.Context, ref, reason string) (string, error) {
 	var reply StringReply
 	if err := c.client.Call("Plugin.Reveal", RevealRequest{Ref: ref, Reason: reason}, &reply); err != nil {
@@ -924,6 +965,15 @@ func (c *hostServicesClient) WriteMirror(_ context.Context, input pluginsdk.Mirr
 		return pluginsdk.MirrorWriteResult{}, err
 	}
 	var result pluginsdk.MirrorWriteResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ResolvePlaybackURL(_ context.Context, input pluginsdk.PlaybackResolveInput) (pluginsdk.PlaybackResolveResult, error) {
+	var reply JSONReply
+	if err := c.client.Call("Plugin.ResolvePlaybackURL", PlaybackResolveRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.PlaybackResolveResult{}, err
+	}
+	var result pluginsdk.PlaybackResolveResult
 	return result, decodeJSON(reply.Data, &result)
 }
 

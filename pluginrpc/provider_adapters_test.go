@@ -36,9 +36,24 @@ func TestDownloaderTagAdapterTreatsLegacyRPCAsUnsupported(t *testing.T) {
 	}
 }
 
+func TestDownloaderSpeedLimitAdapterTreatsLegacyRPCAsUnsupported(t *testing.T) {
+	p := &downloaderProvider{session: failingProviderSession{err: errors.New("rpc: can't find method Plugin.DownloaderSpeedLimitSettings")}}
+	if _, err := p.SpeedLimitSettings(context.Background()); !errors.Is(err, providers.ErrDownloaderSpeedLimitsUnsupported) {
+		t.Fatalf("legacy speed limit RPC error = %v", err)
+	}
+	if _, err := p.SetSpeedLimitSettings(context.Background(), map[string]any{}); !errors.Is(err, providers.ErrDownloaderSpeedLimitsUnsupported) {
+		t.Fatalf("legacy set speed limit RPC error = %v", err)
+	}
+}
+
 func TestProviderAdaptersUseDispensedClientForAllCoreProviders(t *testing.T) {
 	downloader := providerfake.NewDownloader()
 	downloader.SetTransferInfo(providers.TransferInfo{DownloadSpeed: 12, UploadSpeed: 3})
+	downloader.SetSpeedLimitDeclaration(
+		[]providers.SpeedLimitGroup{{ID: "normal", Label: "普通速度"}},
+		[]providers.SpeedLimitField{{Name: "download", Component: providers.SpeedLimitComponentInput, Type: providers.SpeedLimitFieldNumber, Label: "下载限速", Group: "normal", InputSuffixOptions: []providers.SpeedLimitInputSuffixOption{{Label: "KB/s", Value: 1024}}}},
+		map[string]any{"download": int64(1024)},
+	)
 	media := providerfake.NewMediaServer()
 	media.AddLibrary(providers.Library{ExternalID: "lib", Name: "Movies"})
 	media.AddItem(providers.LibraryItem{ExternalID: "movie", LibraryID: "lib", Title: "Arrival", TMDBID: 329865})
@@ -92,6 +107,16 @@ func TestProviderAdaptersUseDispensedClientForAllCoreProviders(t *testing.T) {
 	}
 	if got, err := d.TransferInfo(context.Background()); err != nil || got.DownloadSpeed != 12 {
 		t.Fatalf("downloader TransferInfo = %#v, %v", got, err)
+	}
+	limiter, ok := d.(providers.DownloaderSpeedLimitProvider)
+	if !ok {
+		t.Fatal("downloader speed limit adapter missing")
+	}
+	if got, err := limiter.SpeedLimitSettings(context.Background()); err != nil || got.Values["download"] != float64(1024) || len(got.Fields) != 1 {
+		t.Fatalf("downloader SpeedLimitSettings = %#v, %v", got, err)
+	}
+	if got, err := limiter.SetSpeedLimitSettings(context.Background(), map[string]any{"download": float64(2048)}); err != nil || got.Values["download"] != float64(2048) {
+		t.Fatalf("downloader SetSpeedLimitSettings = %#v, %v", got, err)
 	}
 	tagger, ok := d.(providers.DownloaderTagProvider)
 	if !ok {
