@@ -7,6 +7,14 @@ import (
 
 const CapabilityHTTPService = "service.http"
 
+type HTTPServiceAuthMode string
+
+const (
+	HTTPServiceAuthSession HTTPServiceAuthMode = "session"
+	HTTPServiceAuthToken   HTTPServiceAuthMode = "token"
+	HTTPServiceAuthPublic  HTTPServiceAuthMode = "public"
+)
+
 // DefaultHTTPServicePathPrefix is the namespace used for plugin-owned HTTP
 // services that do not declare an explicit path_prefix. The Host appends the
 // plugin and service IDs to keep the route stable and collision-resistant.
@@ -24,12 +32,14 @@ func DefaultHTTPServicePath(pluginID, serviceName string) string {
 // when it is empty, the service is available on the Host's current entrypoint.
 // An empty PathPrefix receives a stable Host-managed plugin/service prefix.
 type HTTPServiceDefinition struct {
-	Name                  string   `yaml:"name" json:"name"`
-	PublicHostConfigField string   `yaml:"public_host_config_field" json:"public_host_config_field"`
-	PathPrefix            string   `yaml:"path_prefix,omitempty" json:"path_prefix,omitempty"`
-	Methods               []string `yaml:"methods,omitempty" json:"methods,omitempty"`
-	Streaming             bool     `yaml:"streaming,omitempty" json:"streaming,omitempty"`
-	WebSocket             bool     `yaml:"websocket,omitempty" json:"websocket,omitempty"`
+	Name                  string              `yaml:"name" json:"name"`
+	PublicHostConfigField string              `yaml:"public_host_config_field" json:"public_host_config_field"`
+	PathPrefix            string              `yaml:"path_prefix,omitempty" json:"path_prefix,omitempty"`
+	Methods               []string            `yaml:"methods,omitempty" json:"methods,omitempty"`
+	AuthMode              HTTPServiceAuthMode `yaml:"auth_mode" json:"auth_mode"`
+	RequiredPermissions   []string            `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
+	Streaming             bool                `yaml:"streaming,omitempty" json:"streaming,omitempty"`
+	WebSocket             bool                `yaml:"websocket,omitempty" json:"websocket,omitempty"`
 }
 
 type HTTPServiceOptions struct {

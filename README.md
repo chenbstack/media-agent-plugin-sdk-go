@@ -56,6 +56,33 @@ receive only a structured resource context. Manifest permission predicates are
 presentation filters; plugin APIs and Host APIs must still authorize every
 operation.
 
+Every `api.endpoint` must explicitly declare its authentication mode and an
+allowlist of methods and paths. Session APIs can require all or any host user
+permissions at either service or operation scope; the host rejects undeclared
+routes and missing permissions before invoking the plugin:
+
+```yaml
+api:
+  service: app
+  auth: session
+  required_any_permissions: [users.manage, system_settings.manage]
+  capabilities:
+    - name: users.update
+      method: PUT
+      path: /users/{id}
+      required_permissions: [users.manage]
+```
+
+Path parameters occupy one complete segment. Cross-plugin calls remain a
+separate, narrower surface and require `plugin_callable: true`; parameterized
+paths cannot be exported that way.
+
+Plugin-owned HTTP servers declared with `service.http` must also choose an
+explicit `auth_mode`: `session` uses host login and optional
+`required_permissions`, `token` delegates authentication to a plugin-specific
+token, and `public` is intentionally anonymous. Token and public services
+cannot declare host user permissions.
+
 An `identity.provider` declares one or more `credentials` or `oidc` flows.
 Credential-only providers continue implementing `IdentityProvider`. Redirect
 flows additionally implement `IdentityRedirectProvider`; the host supplies the

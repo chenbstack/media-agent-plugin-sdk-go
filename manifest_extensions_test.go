@@ -183,7 +183,13 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 	valid := Manifest{
 		ID: "family", Name: "Family", Version: "1", Type: "builtin",
 		Capabilities: []string{"api.endpoint", "ui.module", "ui.action"},
-		API:          &APIExtension{Service: "app", Auth: "session"},
+		API: &APIExtension{
+			Service: "app",
+			Auth:    "session",
+			Capabilities: []APIServiceCapability{{
+				Name: "requests.list", Method: "GET", Path: "/requests",
+			}},
+		},
 		UI: &UIExtension{Module: "ui/index.js", Routes: []UIRoute{{
 			ID: "family.requests", Path: "/plugin/family/requests", Export: "RequestsPage",
 		}}, Actions: []UIAction{{ID: "family.request", Slot: "media.detail.primary-actions", Export: "MediaRequestAction"}}},
@@ -215,6 +221,10 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "api without capability", edit: func(m *Manifest) {
 			m.Capabilities = []string{"ui.module"}
 		}, want: "声明 api"},
+		{name: "api without auth", edit: func(m *Manifest) { m.API.Auth = "" }, want: "必须显式声明"},
+		{name: "invalid api permission", edit: func(m *Manifest) {
+			m.API.RequiredPermissions = []string{"users/manage"}
+		}, want: "required_permissions"},
 		{name: "card header export without title", edit: func(m *Manifest) {
 			m.UI.Cards = []UICard{{ID: "family.card", Size: "half", Export: "CardBody", HeaderExport: "CardHeaderExtra"}}
 		}, want: "缺少 title"},
@@ -269,6 +279,12 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "api capabilities duplicate", edit: func(m *Manifest) {
 			m.API.Capabilities = []APIServiceCapability{{Name: "op", Method: "GET", Path: "/x"}, {Name: "op", Method: "POST", Path: "/y"}}
 		}, want: "重复"},
+		{name: "api capabilities malformed parameter", edit: func(m *Manifest) {
+			m.API.Capabilities = []APIServiceCapability{{Name: "op", Method: "GET", Path: "/users/prefix{id}"}}
+		}, want: "path"},
+		{name: "api callable capability with parameter", edit: func(m *Manifest) {
+			m.API.Capabilities = []APIServiceCapability{{Name: "op", Method: "GET", Path: "/users/{id}", PluginCallable: true}}
+		}, want: "不支持路径参数"},
 	}
 
 	for _, tt := range tests {

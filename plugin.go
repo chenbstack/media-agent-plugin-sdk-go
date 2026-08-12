@@ -94,9 +94,11 @@ type OnboardingWorkflow struct {
 // APIExtension 声明由宿主代理的插件业务 API。Service 会成为
 // /api/v1/plugin-services/{plugin_id}/{service}/... 中的 service 段。
 type APIExtension struct {
-	Service              string      `yaml:"service" json:"service"`
-	Auth                 APIAuthMode `yaml:"auth,omitempty" json:"auth,omitempty"`
-	RequiredEntitlements []string    `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	Service                string      `yaml:"service" json:"service"`
+	Auth                   APIAuthMode `yaml:"auth,omitempty" json:"auth,omitempty"`
+	RequiredEntitlements   []string    `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	RequiredPermissions    []string    `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
+	RequiredAnyPermissions []string    `yaml:"required_any_permissions,omitempty" json:"required_any_permissions,omitempty"`
 	// Capabilities 声明本服务提供的具名业务能力。PluginCallable 默认 false；
 	// 只有显式开启的能力才能由其他插件经宿主 broker 调用。
 	Capabilities []APIServiceCapability `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
@@ -105,10 +107,12 @@ type APIExtension struct {
 // APIServiceCapability 声明 api.endpoint 服务的一项具名能力。Method/Path 是
 // 宿主内部路由；PluginCallable 控制它是否进入跨插件服务总线。
 type APIServiceCapability struct {
-	Name           string `yaml:"name" json:"name"`
-	Method         string `yaml:"method" json:"method"`
-	Path           string `yaml:"path" json:"path"`
-	PluginCallable bool   `yaml:"plugin_callable,omitempty" json:"plugin_callable,omitempty"`
+	Name                   string   `yaml:"name" json:"name"`
+	Method                 string   `yaml:"method" json:"method"`
+	Path                   string   `yaml:"path" json:"path"`
+	PluginCallable         bool     `yaml:"plugin_callable,omitempty" json:"plugin_callable,omitempty"`
+	RequiredPermissions    []string `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
+	RequiredAnyPermissions []string `yaml:"required_any_permissions,omitempty" json:"required_any_permissions,omitempty"`
 }
 
 // PluginCallableCapabilities 返回本服务显式允许其他插件调用的能力。
@@ -874,6 +878,15 @@ func (p Plugin) Validate() error {
 		if service.PathPrefix != "" && (service.PathPrefix == "/" || !strings.HasPrefix(service.PathPrefix, "/") || path.Clean(service.PathPrefix) != service.PathPrefix) {
 			return fmt.Errorf("插件 %s: http service %s 的 path_prefix %q 格式无效", m.ID, service.Name, service.PathPrefix)
 		}
+		if service.AuthMode != HTTPServiceAuthSession && service.AuthMode != HTTPServiceAuthToken && service.AuthMode != HTTPServiceAuthPublic {
+			return fmt.Errorf("插件 %s: http service %s 的 auth_mode 必须显式声明 session、token 或 public", m.ID, service.Name)
+		}
+		if err := validateIdentityKeys(m.ID, "http service "+service.Name+" required_permissions", service.RequiredPermissions); err != nil {
+			return err
+		}
+		if service.AuthMode != HTTPServiceAuthSession && len(service.RequiredPermissions) > 0 {
+			return fmt.Errorf("插件 %s: 只有 session HTTP service 可以声明 required_permissions", m.ID)
+		}
 		seenMethods := map[string]struct{}{}
 		for _, method := range service.Methods {
 			switch method {
@@ -973,13 +986,40 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 		if m.API.Auth != "" && m.API.Auth != APIAuthSession && m.API.Auth != APIAuthNone {
 			return fmt.Errorf("插件 %s: api.auth 只支持 session 或 none", m.ID)
 		}
+		if m.API.Auth == "" {
+			return fmt.Errorf("插件 %s: api.auth 必须显式声明 session 或 none", m.ID)
+		}
+		if err := validateIdentityKeys(m.ID, "api.required_permissions", m.API.RequiredPermissions); err != nil {
+			return err
+		}
+		if err := validateIdentityKeys(m.ID, "api.required_any_permissions", m.API.RequiredAnyPermissions); err != nil {
+			return err
+		}
+		if m.API.Auth != APIAuthSession && (len(m.API.RequiredPermissions) > 0 || len(m.API.RequiredAnyPermissions) > 0) {
+			return fmt.Errorf("插件 %s: 只有 session API 可以声明 required_permissions", m.ID)
+		}
 		if _, err := validateEntitlements(m.ID, "api", m.API.RequiredEntitlements, declaredEntitlements); err != nil {
 			return err
+		}
+		if len(m.API.Capabilities) == 0 {
+			return fmt.Errorf("插件 %s: api.capabilities 必须逐项声明允许访问的 method 与 path", m.ID)
 		}
 		seenExports := map[string]struct{}{}
 		for _, capability := range m.API.Capabilities {
 			if err := validateAPIServiceCapability(m.ID, "api.capabilities", capability.Name, capability.Method, capability.Path, seenExports); err != nil {
 				return err
+			}
+			if err := validateIdentityKeys(m.ID, "api capability "+capability.Name+" required_permissions", capability.RequiredPermissions); err != nil {
+				return err
+			}
+			if err := validateIdentityKeys(m.ID, "api capability "+capability.Name+" required_any_permissions", capability.RequiredAnyPermissions); err != nil {
+				return err
+			}
+			if m.API.Auth != APIAuthSession && (len(capability.RequiredPermissions) > 0 || len(capability.RequiredAnyPermissions) > 0) {
+				return fmt.Errorf("插件 %s: 只有 session API capability 可以声明 required_permissions", m.ID)
+			}
+			if capability.PluginCallable && strings.Contains(capability.Path, "{") {
+				return fmt.Errorf("插件 %s: 可供插件调用的 API capability %q 不支持路径参数", m.ID, capability.Name)
 			}
 		}
 	}
@@ -1179,10 +1219,27 @@ func validateAPIServiceCapability(pluginID, owner, name, method, path string, se
 	default:
 		return fmt.Errorf("插件 %s: %s 能力 %q 的 method %q 无效", pluginID, owner, name, method)
 	}
-	if !strings.HasPrefix(path, "/") {
+	if !validAPICapabilityPath(path) {
 		return fmt.Errorf("插件 %s: %s 能力 %q 的 path 必须以 / 开头", pluginID, owner, name)
 	}
 	return nil
+}
+
+func validAPICapabilityPath(value string) bool {
+	if !strings.HasPrefix(value, "/") || strings.ContainsAny(value, `\\%?#`) || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, segment := range strings.Split(strings.Trim(value, "/"), "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+		if strings.ContainsAny(segment, "{}") {
+			if len(segment) < 3 || segment[0] != '{' || segment[len(segment)-1] != '}' || !manifestIdentifier.MatchString(segment[1:len(segment)-1]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validateIdentityKeys(pluginID, owner string, values []string) error {

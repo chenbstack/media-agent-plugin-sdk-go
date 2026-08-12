@@ -15,13 +15,14 @@ func TestHTTPServiceManifestValidation(t *testing.T) {
 	valid := Plugin{Manifest: Manifest{
 		ID: "proxy", Name: "Proxy", Version: "0.1.0", Type: "cli",
 		Capabilities: []string{CapabilityHTTPService},
-		HTTPServices: []HTTPServiceDefinition{{Name: "emby", PublicHostConfigField: "public_host", PathPrefix: "/proxy", Methods: []string{"GET", "HEAD"}, Streaming: true}},
+		HTTPServices: []HTTPServiceDefinition{{Name: "emby", PublicHostConfigField: "public_host", PathPrefix: "/proxy", Methods: []string{"GET", "HEAD"}, AuthMode: HTTPServiceAuthToken, Streaming: true}},
 		Resources:    Resources{MemoryLimitMB: 64},
 	}}
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	defaultHost := valid
+	defaultHost.Manifest.HTTPServices = append([]HTTPServiceDefinition(nil), valid.Manifest.HTTPServices...)
 	defaultHost.Manifest.HTTPServices[0].PublicHostConfigField = ""
 	if err := defaultHost.Validate(); err != nil {
 		t.Fatalf("empty public host field should use Host default: %v", err)
@@ -32,13 +33,25 @@ func TestHTTPServiceManifestValidation(t *testing.T) {
 		t.Fatal("service.http without http_services must fail")
 	}
 	badHostField := valid
-	badHostField.Manifest.HTTPServices = []HTTPServiceDefinition{{Name: "emby", PublicHostConfigField: "bad field"}}
+	badHostField.Manifest.HTTPServices = []HTTPServiceDefinition{{Name: "emby", PublicHostConfigField: "bad field", AuthMode: HTTPServiceAuthToken}}
 	if err := badHostField.Validate(); err == nil {
 		t.Fatal("invalid public host field must fail")
 	}
 	badPath := valid
-	badPath.Manifest.HTTPServices = []HTTPServiceDefinition{{Name: "emby", PublicHostConfigField: "public_host", PathPrefix: "proxy"}}
+	badPath.Manifest.HTTPServices = []HTTPServiceDefinition{{Name: "emby", PublicHostConfigField: "public_host", PathPrefix: "proxy", AuthMode: HTTPServiceAuthToken}}
 	if err := badPath.Validate(); err == nil {
 		t.Fatal("relative path prefix must fail")
+	}
+	missingAuth := valid
+	missingAuth.Manifest.HTTPServices = append([]HTTPServiceDefinition(nil), valid.Manifest.HTTPServices...)
+	missingAuth.Manifest.HTTPServices[0].AuthMode = ""
+	if err := missingAuth.Validate(); err == nil {
+		t.Fatal("http service without explicit auth_mode must fail")
+	}
+	invalidPermissions := valid
+	invalidPermissions.Manifest.HTTPServices = append([]HTTPServiceDefinition(nil), valid.Manifest.HTTPServices...)
+	invalidPermissions.Manifest.HTTPServices[0].RequiredPermissions = []string{"users.manage"}
+	if err := invalidPermissions.Validate(); err == nil {
+		t.Fatal("token http service must not declare host permissions")
 	}
 }

@@ -116,7 +116,7 @@ func TestHTTPServiceLifecycleRoundTrip(t *testing.T) {
 	impl := pluginsdk.Plugin{
 		Manifest: pluginsdk.Manifest{
 			ID: "strm", Name: "STRM",
-			HTTPServices: []pluginsdk.HTTPServiceDefinition{{Name: "playback"}},
+			HTTPServices: []pluginsdk.HTTPServiceDefinition{{Name: "playback", AuthMode: pluginsdk.HTTPServiceAuthToken}},
 		},
 		NewHTTPService: func(_ context.Context, inst pluginsdk.Instance, _ pluginsdk.SecretResolver, name string) (pluginsdk.HTTPService, error) {
 			if inst.ID != "global" || name != "playback" {
