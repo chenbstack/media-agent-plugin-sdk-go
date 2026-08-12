@@ -324,7 +324,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 	}
 	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil || inst.SiteAccounts != nil ||
 		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil || inst.Connections != nil ||
-		inst.Storages != nil || inst.Schedules != nil || inst.Settings != nil || inst.PluginServices != nil ||
+		inst.Storages != nil || inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
 		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil {
 		id := c.broker.NextId()
 		payload.HostServicesBrokerID = id
@@ -349,6 +349,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			storages:          inst.Storages,
 			schedules:         inst.Schedules,
 			settings:          inst.Settings,
+			entitlements:      inst.Entitlements,
 			pluginServices:    inst.PluginServices,
 			sidecars:          inst.Sidecars,
 			mirrors:           inst.Mirrors,

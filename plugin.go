@@ -34,33 +34,38 @@ const (
 )
 
 type Manifest struct {
-	ID             string                    `yaml:"id" json:"id"`
-	Name           string                    `yaml:"name" json:"name"`
-	Version        string                    `yaml:"version" json:"version"`
-	Description    string                    `yaml:"description" json:"description,omitempty"`
-	Category       string                    `yaml:"category,omitempty" json:"category,omitempty"`
-	Tags           []string                  `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Type           string                    `yaml:"type" json:"type"` // builtin / cli / rule / ui
-	Entry          map[string]string         `yaml:"entry,omitempty" json:"entry,omitempty"`
-	Protocol       string                    `yaml:"protocol,omitempty" json:"protocol,omitempty"`
-	Transport      string                    `yaml:"transport,omitempty" json:"transport,omitempty"`
-	ServeArgs      []string                  `yaml:"serve_args,omitempty" json:"serve_args,omitempty"`
-	StdioArgs      []string                  `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
-	Capabilities   []string                  `yaml:"capabilities" json:"capabilities"`
-	Subscriptions  []EventSubscription       `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
-	API            *APIExtension             `yaml:"api,omitempty" json:"api,omitempty"`
-	UI             *UIExtension              `yaml:"ui,omitempty" json:"ui,omitempty"`
-	Identity       *IdentityExtension        `yaml:"identity,omitempty" json:"identity,omitempty"`
-	Onboarding     *OnboardingWorkflow       `yaml:"onboarding,omitempty" json:"onboarding,omitempty"`
-	Entitlements   []string                  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
-	Actions        []ActionDefinition        `yaml:"actions,omitempty" json:"actions,omitempty"`
-	ScheduledTasks []ScheduledTaskDefinition `yaml:"scheduled_tasks,omitempty" json:"scheduled_tasks,omitempty"`
-	HTTPServices   []HTTPServiceDefinition   `yaml:"http_services,omitempty" json:"http_services,omitempty"`
-	Artifacts      []ArtifactDefinition      `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
-	Permissions    Permissions               `yaml:"permissions" json:"permissions"`
-	Resources      Resources                 `yaml:"resources" json:"resources"`
-	Install        *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
+	ID                 string                    `yaml:"id" json:"id"`
+	Name               string                    `yaml:"name" json:"name"`
+	Version            string                    `yaml:"version" json:"version"`
+	Description        string                    `yaml:"description" json:"description,omitempty"`
+	Category           string                    `yaml:"category,omitempty" json:"category,omitempty"`
+	Tags               []string                  `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Type               string                    `yaml:"type" json:"type"` // builtin / cli / rule / ui
+	Entry              map[string]string         `yaml:"entry,omitempty" json:"entry,omitempty"`
+	Protocol           string                    `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+	Transport          string                    `yaml:"transport,omitempty" json:"transport,omitempty"`
+	ServeArgs          []string                  `yaml:"serve_args,omitempty" json:"serve_args,omitempty"`
+	StdioArgs          []string                  `yaml:"stdio_args,omitempty" json:"stdio_args,omitempty"`
+	Capabilities       []string                  `yaml:"capabilities" json:"capabilities"`
+	Subscriptions      []EventSubscription       `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
+	API                *APIExtension             `yaml:"api,omitempty" json:"api,omitempty"`
+	UI                 *UIExtension              `yaml:"ui,omitempty" json:"ui,omitempty"`
+	Identity           *IdentityExtension        `yaml:"identity,omitempty" json:"identity,omitempty"`
+	Onboarding         *OnboardingWorkflow       `yaml:"onboarding,omitempty" json:"onboarding,omitempty"`
+	Entitlements       []string                  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
+	RequiredMembership MembershipLevel           `yaml:"required_membership,omitempty" json:"required_membership,omitempty"`
+	Actions            []ActionDefinition        `yaml:"actions,omitempty" json:"actions,omitempty"`
+	ScheduledTasks     []ScheduledTaskDefinition `yaml:"scheduled_tasks,omitempty" json:"scheduled_tasks,omitempty"`
+	HTTPServices       []HTTPServiceDefinition   `yaml:"http_services,omitempty" json:"http_services,omitempty"`
+	Artifacts          []ArtifactDefinition      `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
+	Permissions        Permissions               `yaml:"permissions" json:"permissions"`
+	Resources          Resources                 `yaml:"resources" json:"resources"`
+	Install            *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
 }
+
+type MembershipLevel string
+
+const MembershipPro MembershipLevel = "pro"
 
 // ArtifactDefinition declares a user-visible file produced by a plugin from an
 // imported media file. The host owns path derivation and persistence; plugins
@@ -512,6 +517,7 @@ type Instance struct {
 	DB            PluginDB
 	Logger        Logger
 	Settings      Settings
+	Entitlements  Entitlements
 	SiteAccounts  SiteAccounts
 	Subscriptions Subscriptions
 	Downloads     Downloads
@@ -941,6 +947,9 @@ func validateCardSourcePath(pluginID, label string, source UICardSource) error {
 }
 
 func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
+	if m.RequiredMembership != "" && m.RequiredMembership != MembershipPro {
+		return fmt.Errorf("插件 %s: required_membership 只支持 pro", m.ID)
+	}
 	declaredEntitlements, err := validateEntitlements(m.ID, "manifest", m.Entitlements, nil)
 	if err != nil {
 		return err

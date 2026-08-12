@@ -34,10 +34,23 @@ type hostServicesServer struct {
 	storages          pluginsdk.Storages
 	schedules         pluginsdk.Schedules
 	settings          pluginsdk.Settings
+	entitlements      pluginsdk.Entitlements
 	pluginServices    pluginsdk.PluginServices
 	sidecars          pluginsdk.MediaSidecars
 	mirrors           pluginsdk.MediaMirrors
 	playback          pluginsdk.MediaPlayback
+}
+
+type EntitlementCheckRequest struct{ Feature string }
+type EntitlementCheckReply struct{ Granted bool }
+
+func (s *hostServicesServer) HasEntitlement(req EntitlementCheckRequest, reply *EntitlementCheckReply) error {
+	if s.entitlements == nil {
+		reply.Granted = false
+		return nil
+	}
+	reply.Granted = s.entitlements.HasEntitlement(s.ctx, strings.TrimSpace(req.Feature))
+	return nil
 }
 
 type RevealRequest struct {
@@ -841,6 +854,11 @@ type hostServicesClient struct {
 
 func (c *hostServicesClient) Close() error {
 	return c.client.Close()
+}
+
+func (c *hostServicesClient) HasEntitlement(_ context.Context, feature string) bool {
+	var reply EntitlementCheckReply
+	return c.client.Call("Plugin.HasEntitlement", EntitlementCheckRequest{Feature: feature}, &reply) == nil && reply.Granted
 }
 
 func (c *hostServicesClient) Reveal(ctx context.Context, ref, reason string) (string, error) {
