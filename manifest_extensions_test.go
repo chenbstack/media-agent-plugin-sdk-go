@@ -38,6 +38,7 @@ ui:
       export: RequestsPage
       required_entitlements:
         - collaboration.requests.enabled
+      required_permissions: [request.create]
       menu:
         section: automation
         label: 订阅申请
@@ -103,6 +104,9 @@ resources:
 	}
 	if manifest.UI == nil || len(manifest.UI.Routes) != 1 || len(manifest.UI.Actions) != 1 || manifest.UI.Routes[0].Menu == nil {
 		t.Fatalf("ui = %#v", manifest.UI)
+	}
+	if got := manifest.UI.Routes[0].RequiredPermissions; len(got) != 1 || got[0] != "request.create" {
+		t.Fatalf("route required_permissions = %v", got)
 	}
 	if len(manifest.UI.Cards) != 1 || manifest.UI.Cards[0].Title != "家庭总览" || manifest.UI.Cards[0].HeaderExport != "OverviewCardHeader" {
 		t.Fatalf("cards = %#v", manifest.UI.Cards)
@@ -205,6 +209,9 @@ func TestManifestExtensionValidationRejectsUnsafeOrInconsistentDeclarations(t *t
 		{name: "undeclared entitlement", edit: func(m *Manifest) {
 			m.UI.Routes[0].RequiredEntitlements = []string{"collaboration.requests.enabled"}
 		}, want: "未在 manifest 声明"},
+		{name: "invalid route permission", edit: func(m *Manifest) {
+			m.UI.Routes[0].RequiredPermissions = []string{"users/manage"}
+		}, want: "required_permissions"},
 		{name: "api without capability", edit: func(m *Manifest) {
 			m.Capabilities = []string{"ui.module"}
 		}, want: "声明 api"},

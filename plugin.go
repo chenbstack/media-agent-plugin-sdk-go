@@ -222,6 +222,7 @@ type UIRoute struct {
 	Path                 string   `yaml:"path" json:"path"`
 	Export               string   `yaml:"export" json:"export"`
 	RequiredEntitlements []string `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
+	RequiredPermissions  []string `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
 	Menu                 *UIMenu  `yaml:"menu,omitempty" json:"menu,omitempty"`
 }
 
@@ -1025,6 +1026,9 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 				return fmt.Errorf("插件 %s: ui route %s 的 export %q 格式无效", m.ID, route.ID, route.Export)
 			}
 			if _, err := validateEntitlements(m.ID, "ui route "+route.ID, route.RequiredEntitlements, declaredEntitlements); err != nil {
+				return err
+			}
+			if err := validateIdentityKeys(m.ID, "ui route "+route.ID+" required_permissions", route.RequiredPermissions); err != nil {
 				return err
 			}
 			if route.Menu != nil {
