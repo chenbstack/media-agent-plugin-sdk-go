@@ -31,6 +31,37 @@ Published builds should depend on an immutable tag. For local development
 across repositories, use an uncommitted `go.work` file rather than committing a
 relative `replace` directive.
 
+## Agent tools and skills
+
+Plugins can declare bounded business tools under `agent.tools` by referencing
+their own session API capabilities. They may also declare multiple reusable
+workflows under `agent.skills`; every skill references one or more tools
+declared by the same plugin:
+
+```yaml
+agent:
+  tools:
+    - name: example.summary
+      description: Read a bounded summary
+      capability: agent.summary
+      risk: none
+      input_schema: {type: object, additionalProperties: false}
+  skills:
+    - name: example.troubleshooting
+      description: Diagnose an example-plugin issue
+      instructions: Read the summary first and explain only returned facts.
+      tools: [example.summary]
+    - name: example.another-workflow
+      description: A second workflow from the same plugin
+      instructions: Follow the plugin-specific sequence.
+      tools: [example.summary]
+```
+
+Skills are workflow guidance, not permissions. The host exposes a skill only
+when all referenced tools are authorized for the current actor, and every tool
+execution still rechecks host permissions, plugin entitlements, read-only
+state, confirmation requirements, and resource ownership.
+
 ## Onboarding assessment
 
 A plugin that declares `onboarding.assess` may implement

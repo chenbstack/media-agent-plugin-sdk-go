@@ -37,6 +37,11 @@ agent:
       input_schema:
         type: object
         additionalProperties: false
+  skills:
+    - name: family.request-troubleshooting
+      description: 排查媒体申请状态
+      instructions: 先读取申请列表，再根据状态解释下一步。
+      tools: [family.requests_list]
   required_entitlements:
     - collaboration.requests.enabled
 ui:
@@ -104,7 +109,7 @@ resources:
 	if manifest.API == nil || manifest.API.Service != "app" {
 		t.Fatalf("api = %#v", manifest.API)
 	}
-	if manifest.Agent == nil || len(manifest.Agent.Tools) != 1 || manifest.Agent.Tools[0].Capability != "requests.preview" {
+	if manifest.Agent == nil || len(manifest.Agent.Tools) != 1 || manifest.Agent.Tools[0].Capability != "requests.preview" || len(manifest.Agent.Skills) != 1 {
 		t.Fatalf("agent tools = %#v", manifest.Agent)
 	}
 	if len(manifest.API.Capabilities) != 2 || manifest.API.Capabilities[0].PluginCallable || !manifest.API.Capabilities[1].PluginCallable {
@@ -187,6 +192,33 @@ func TestManifestAgentToolValidation(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestManifestSupportsMultipleAgentSkillsAndValidatesToolReferences(t *testing.T) {
+	manifest := Manifest{
+		ID: "family", Name: "Family", Version: "1", Type: "builtin", Capabilities: []string{"api.endpoint"},
+		API: &APIExtension{Service: "app", Auth: APIAuthSession, Capabilities: []APIServiceCapability{
+			{Name: "requests.list", Method: "GET", Path: "/requests", RequiredPermissions: []string{"request.create"}},
+			{Name: "quota.read", Method: "GET", Path: "/quota", RequiredPermissions: []string{"request.create"}},
+		}},
+		Agent: &AgentExtension{
+			Tools: []AgentToolDefinition{
+				{Name: "family.requests_list", Description: "查询申请", Capability: "requests.list", InputSchema: map[string]any{"type": "object"}, Risk: "none"},
+				{Name: "family.quota", Description: "查询额度", Capability: "quota.read", InputSchema: map[string]any{"type": "object"}, Risk: "none"},
+			},
+			Skills: []AgentSkillDefinition{
+				{Name: "family.request-troubleshooting", Description: "排查申请", Instructions: "先查申请再解释", Tools: []string{"family.requests_list"}},
+				{Name: "family.quota-troubleshooting", Description: "排查额度", Instructions: "先查额度再解释", Tools: []string{"family.quota"}},
+			},
+		},
+	}
+	if err := (Plugin{Manifest: manifest}).Validate(); err != nil {
+		t.Fatalf("multiple skills should validate: %v", err)
+	}
+	manifest.Agent.Skills[1].Tools = []string{"family.missing"}
+	if err := (Plugin{Manifest: manifest}).Validate(); err == nil || !strings.Contains(err.Error(), "未声明") {
+		t.Fatalf("missing tool reference error = %v", err)
 	}
 }
 

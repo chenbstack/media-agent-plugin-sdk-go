@@ -70,7 +70,19 @@ type Manifest struct {
 // its Agent runtime. The host still owns authorization, tool registration and
 // execution; a declaration never grants access by itself.
 type AgentExtension struct {
-	Tools []AgentToolDefinition `yaml:"tools" json:"tools"`
+	Tools  []AgentToolDefinition  `yaml:"tools" json:"tools"`
+	Skills []AgentSkillDefinition `yaml:"skills,omitempty" json:"skills,omitempty"`
+}
+
+// AgentSkillDefinition declares one reusable workflow for the plugin's Agent
+// tools. A plugin may declare multiple skills. Skills are guidance only: the
+// host filters them by the referenced tools' current authorization and every
+// tool call still passes through the normal permission and confirmation path.
+type AgentSkillDefinition struct {
+	Name         string   `yaml:"name" json:"name"`
+	Description  string   `yaml:"description" json:"description"`
+	Instructions string   `yaml:"instructions" json:"instructions"`
+	Tools        []string `yaml:"tools" json:"tools"`
 }
 
 // AgentToolDefinition maps one model-visible tool to an existing session API
@@ -1220,6 +1232,38 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 			}
 			if _, err := json.Marshal(tool.InputSchema); err != nil {
 				return fmt.Errorf("插件 %s: agent tool %q 的 input_schema 无法编码: %w", m.ID, tool.Name, err)
+			}
+		}
+		seenSkills := make(map[string]struct{}, len(m.Agent.Skills))
+		if len(m.Agent.Skills) > 50 {
+			return fmt.Errorf("插件 %s: agent.skills 不能超过 50 项", m.ID)
+		}
+		for _, skill := range m.Agent.Skills {
+			if !manifestIdentifier.MatchString(skill.Name) || !strings.HasPrefix(skill.Name, m.ID+".") {
+				return fmt.Errorf("插件 %s: agent skill name %q 必须使用插件 id 作为命名空间", m.ID, skill.Name)
+			}
+			if _, exists := seenSkills[skill.Name]; exists {
+				return fmt.Errorf("插件 %s: agent skill name 重复 %q", m.ID, skill.Name)
+			}
+			seenSkills[skill.Name] = struct{}{}
+			if strings.TrimSpace(skill.Description) == "" || strings.TrimSpace(skill.Instructions) == "" {
+				return fmt.Errorf("插件 %s: agent skill %q 必须声明 description 与 instructions", m.ID, skill.Name)
+			}
+			if len(skill.Description) > 500 || len(skill.Instructions) > 8000 {
+				return fmt.Errorf("插件 %s: agent skill %q 内容过长", m.ID, skill.Name)
+			}
+			if len(skill.Tools) == 0 || len(skill.Tools) > 20 {
+				return fmt.Errorf("插件 %s: agent skill %q 必须引用 1 到 20 个 agent tools", m.ID, skill.Name)
+			}
+			seenSkillTools := map[string]struct{}{}
+			for _, toolName := range skill.Tools {
+				if _, exists := seenTools[toolName]; !exists {
+					return fmt.Errorf("插件 %s: agent skill %q 引用了未声明的 agent tool %q", m.ID, skill.Name, toolName)
+				}
+				if _, duplicate := seenSkillTools[toolName]; duplicate {
+					return fmt.Errorf("插件 %s: agent skill %q 重复引用 agent tool %q", m.ID, skill.Name, toolName)
+				}
+				seenSkillTools[toolName] = struct{}{}
 			}
 		}
 	}
