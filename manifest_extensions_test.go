@@ -28,6 +28,15 @@ api:
       method: POST
       path: /requests
       plugin_callable: true
+agent:
+  tools:
+    - name: family.requests_list
+      description: 查询当前用户可见的媒体申请
+      capability: requests.preview
+      risk: none
+      input_schema:
+        type: object
+        additionalProperties: false
   required_entitlements:
     - collaboration.requests.enabled
 ui:
@@ -95,6 +104,9 @@ resources:
 	if manifest.API == nil || manifest.API.Service != "app" {
 		t.Fatalf("api = %#v", manifest.API)
 	}
+	if manifest.Agent == nil || len(manifest.Agent.Tools) != 1 || manifest.Agent.Tools[0].Capability != "requests.preview" {
+		t.Fatalf("agent tools = %#v", manifest.Agent)
+	}
 	if len(manifest.API.Capabilities) != 2 || manifest.API.Capabilities[0].PluginCallable || !manifest.API.Capabilities[1].PluginCallable {
 		t.Fatalf("api capabilities = %#v", manifest.API.Capabilities)
 	}
@@ -131,10 +143,50 @@ resources:
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
-	for _, field := range []string{`"api"`, `"ui"`, `"identity"`, `"entitlements"`, `"required_entitlements"`} {
+	for _, field := range []string{`"api"`, `"agent"`, `"ui"`, `"identity"`, `"entitlements"`, `"required_entitlements"`} {
 		if !strings.Contains(string(data), field) {
 			t.Errorf("JSON 缺少 %s: %s", field, data)
 		}
+	}
+}
+
+func TestManifestAgentToolValidation(t *testing.T) {
+	base := Manifest{
+		ID: "family", Name: "Family", Version: "1", Type: "builtin",
+		Capabilities: []string{"api.endpoint"},
+		API: &APIExtension{Service: "app", Auth: APIAuthSession, Capabilities: []APIServiceCapability{{
+			Name: "requests.list", Method: "GET", Path: "/requests", RequiredPermissions: []string{"request.create"},
+		}}},
+		Agent: &AgentExtension{Tools: []AgentToolDefinition{{
+			Name: "family.requests_list", Description: "查询媒体申请", Capability: "requests.list",
+			InputSchema: map[string]any{"type": "object"}, Risk: "none",
+		}}},
+	}
+	if err := (Plugin{Manifest: base}).Validate(); err != nil {
+		t.Fatalf("valid agent declaration: %v", err)
+	}
+	tests := []struct {
+		name string
+		edit func(*Manifest)
+		want string
+	}{
+		{"namespace", func(m *Manifest) { m.Agent.Tools[0].Name = "other.create" }, "命名空间"},
+		{"capability", func(m *Manifest) { m.Agent.Tools[0].Capability = "missing" }, "不存在"},
+		{"schema", func(m *Manifest) { m.Agent.Tools[0].InputSchema = map[string]any{"type": "string"} }, "JSON object schema"},
+		{"write capability", func(m *Manifest) {
+			m.API.Capabilities[0].Method = "POST"
+		}, "必须声明 confirmation"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := base
+			copy.API = &APIExtension{Service: base.API.Service, Auth: base.API.Auth, Capabilities: append([]APIServiceCapability(nil), base.API.Capabilities...)}
+			copy.Agent = &AgentExtension{Tools: append([]AgentToolDefinition(nil), base.Agent.Tools...)}
+			tt.edit(&copy)
+			if err := (Plugin{Manifest: copy}).Validate(); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
