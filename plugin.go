@@ -5,6 +5,7 @@ package pluginsdk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path"
@@ -49,6 +50,7 @@ type Manifest struct {
 	Capabilities       []string                  `yaml:"capabilities" json:"capabilities"`
 	Subscriptions      []EventSubscription       `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
 	API                *APIExtension             `yaml:"api,omitempty" json:"api,omitempty"`
+	Agent              *AgentExtension           `yaml:"agent,omitempty" json:"agent,omitempty"`
 	UI                 *UIExtension              `yaml:"ui,omitempty" json:"ui,omitempty"`
 	Identity           *IdentityExtension        `yaml:"identity,omitempty" json:"identity,omitempty"`
 	Onboarding         *OnboardingWorkflow       `yaml:"onboarding,omitempty" json:"onboarding,omitempty"`
@@ -62,6 +64,39 @@ type Manifest struct {
 	Resources          Resources                 `yaml:"resources" json:"resources"`
 	Install            *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
 	ModelUI            *ModelUI                  `yaml:"model_ui,omitempty" json:"model_ui,omitempty"`
+}
+
+// AgentExtension declares bounded business tools that the host may expose to
+// its Agent runtime. The host still owns authorization, tool registration and
+// execution; a declaration never grants access by itself.
+type AgentExtension struct {
+	Tools []AgentToolDefinition `yaml:"tools" json:"tools"`
+}
+
+// AgentToolDefinition maps one model-visible tool to an existing session API
+// capability. Permissions and entitlements are deliberately inherited from
+// that capability so the Agent path cannot weaken the normal service gateway.
+type AgentToolDefinition struct {
+	Name         string                 `yaml:"name" json:"name"`
+	Description  string                 `yaml:"description" json:"description"`
+	Capability   string                 `yaml:"capability" json:"capability"`
+	InputSchema  map[string]any         `yaml:"input_schema" json:"input_schema"`
+	Risk         string                 `yaml:"risk" json:"risk"`
+	Confirmation *AgentToolConfirmation `yaml:"confirmation,omitempty" json:"confirmation,omitempty"`
+}
+
+// AgentToolConfirmation describes the host-rendered confirmation card for a
+// side-effecting tool. Values are selected from already validated arguments;
+// the plugin cannot inject arbitrary HTML or execute UI code here.
+type AgentToolConfirmation struct {
+	Title        string                       `yaml:"title" json:"title"`
+	ConfirmLabel string                       `yaml:"confirm_label" json:"confirm_label"`
+	Fields       []AgentToolConfirmationField `yaml:"fields,omitempty" json:"fields,omitempty"`
+}
+
+type AgentToolConfirmationField struct {
+	Label    string `yaml:"label" json:"label"`
+	Argument string `yaml:"argument" json:"argument"`
 }
 
 // ModelUI lets a model provider own the user-facing summary of its configured
@@ -1128,6 +1163,63 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 			}
 			if capability.PluginCallable && strings.Contains(capability.Path, "{") {
 				return fmt.Errorf("插件 %s: 可供插件调用的 API capability %q 不支持路径参数", m.ID, capability.Name)
+			}
+		}
+	}
+	if m.Agent != nil {
+		if m.API == nil || m.API.Auth != APIAuthSession {
+			return fmt.Errorf("插件 %s: agent.tools 只能引用 session API capability", m.ID)
+		}
+		if len(m.Agent.Tools) == 0 {
+			return fmt.Errorf("插件 %s: agent.tools 不能为空", m.ID)
+		}
+		apiCapabilities := make(map[string]APIServiceCapability, len(m.API.Capabilities))
+		for _, capability := range m.API.Capabilities {
+			apiCapabilities[capability.Name] = capability
+		}
+		seenTools := make(map[string]struct{}, len(m.Agent.Tools))
+		for _, tool := range m.Agent.Tools {
+			if !manifestIdentifier.MatchString(tool.Name) || !strings.HasPrefix(tool.Name, m.ID+".") {
+				return fmt.Errorf("插件 %s: agent tool name %q 必须使用插件 id 作为命名空间", m.ID, tool.Name)
+			}
+			if _, exists := seenTools[tool.Name]; exists {
+				return fmt.Errorf("插件 %s: agent tool name 重复 %q", m.ID, tool.Name)
+			}
+			seenTools[tool.Name] = struct{}{}
+			if strings.TrimSpace(tool.Description) == "" {
+				return fmt.Errorf("插件 %s: agent tool %q 必须声明 description", m.ID, tool.Name)
+			}
+			capability, exists := apiCapabilities[tool.Capability]
+			if !exists {
+				return fmt.Errorf("插件 %s: agent tool %q 引用了不存在的 API capability %q", m.ID, tool.Name, tool.Capability)
+			}
+			if strings.Contains(capability.Path, "{") {
+				return fmt.Errorf("插件 %s: agent tool %q 暂不支持带路径参数的 API capability", m.ID, tool.Name)
+			}
+			readOnly := capability.Method == "GET" || capability.Method == "HEAD"
+			if !readOnly && tool.Confirmation == nil {
+				return fmt.Errorf("插件 %s: 写入型 agent tool %q 必须声明 confirmation", m.ID, tool.Name)
+			}
+			if tool.Confirmation != nil {
+				if strings.TrimSpace(tool.Confirmation.Title) == "" || strings.TrimSpace(tool.Confirmation.ConfirmLabel) == "" {
+					return fmt.Errorf("插件 %s: agent tool %q 的 confirmation 必须声明 title 与 confirm_label", m.ID, tool.Name)
+				}
+				for _, field := range tool.Confirmation.Fields {
+					if strings.TrimSpace(field.Label) == "" || !manifestIdentifier.MatchString(field.Argument) {
+						return fmt.Errorf("插件 %s: agent tool %q 的 confirmation field 无效", m.ID, tool.Name)
+					}
+				}
+			}
+			switch tool.Risk {
+			case "none", "low", "medium", "high", "critical":
+			default:
+				return fmt.Errorf("插件 %s: agent tool %q 的 risk %q 无效", m.ID, tool.Name, tool.Risk)
+			}
+			if tool.InputSchema == nil || tool.InputSchema["type"] != "object" {
+				return fmt.Errorf("插件 %s: agent tool %q 的 input_schema 必须是 JSON object schema", m.ID, tool.Name)
+			}
+			if _, err := json.Marshal(tool.InputSchema); err != nil {
+				return fmt.Errorf("插件 %s: agent tool %q 的 input_schema 无法编码: %w", m.ID, tool.Name, err)
 			}
 		}
 	}
