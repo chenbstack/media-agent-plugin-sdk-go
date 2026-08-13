@@ -491,15 +491,38 @@ type ModelConfig struct {
 	Threads          int      `json:"threads"`
 	ContextTokens    int      `json:"context_tokens"`
 	DefaultMaxTokens int      `json:"default_max_tokens"`
+	SupportsImages   bool     `json:"supports_images,omitempty"`
 	Notes            string   `json:"notes,omitempty"`
 }
 
 type ModelGenerateRequest struct {
 	Model     ModelConfig
 	Prompt    string
+	Inputs    []ModelInput
 	MaxTokens int
 	Now       func() time.Time
 	Progress  ModelProgressFunc
+}
+
+// ModelInput is bounded user-supplied context for one generation request.
+// Hosts must validate type and size before crossing the plugin boundary.
+type ModelInput struct {
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	MIMEType string `json:"mime_type"`
+	Data     []byte `json:"data,omitempty"`
+	Text     string `json:"text,omitempty"`
+}
+
+type ModelInputCapabilities struct {
+	Images    bool `json:"images"`
+	TextFiles bool `json:"text_files"`
+}
+
+// ModelInputCapabilityProvider is optional. Providers that do not implement
+// it are treated as text-only. Detection must fail closed when uncertain.
+type ModelInputCapabilityProvider interface {
+	InputCapabilities(ctx context.Context, model ModelConfig) (ModelInputCapabilities, error)
 }
 
 // ModelProgress is a provider-reported snapshot for long-running model

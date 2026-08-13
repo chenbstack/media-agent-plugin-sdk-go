@@ -82,13 +82,17 @@ func TestExtendedProviderAdaptersUseDispensedClient(t *testing.T) {
 	model.validateErr = nil
 	fixed := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
 	generated, err := m.Generate(context.Background(), providers.ModelGenerateRequest{
-		Model: modelConfig, Prompt: "hello", MaxTokens: 32, Now: func() time.Time { return fixed },
+		Model: modelConfig, Prompt: "hello", Inputs: []providers.ModelInput{{Kind: "image", Name: "shot.png", MIMEType: "image/png", Data: []byte{1, 2}}}, MaxTokens: 32, Now: func() time.Time { return fixed },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if generated.Output != "generated" || !generated.Started.Equal(fixed) || model.generate.Prompt != "hello" || model.generate.Now == nil || !model.generate.Now().Equal(fixed) {
+	if generated.Output != "generated" || !generated.Started.Equal(fixed) || model.generate.Prompt != "hello" || len(model.generate.Inputs) != 1 || model.generate.Inputs[0].Name != "shot.png" || model.generate.Now == nil || !model.generate.Now().Equal(fixed) {
 		t.Fatalf("model generate = %#v, recorded=%#v", generated, model.generate)
+	}
+	capabilities, err := m.(providers.ModelInputCapabilityProvider).InputCapabilities(context.Background(), modelConfig)
+	if err != nil || !capabilities.Images || !capabilities.TextFiles {
+		t.Fatalf("input capabilities = %+v, err=%v", capabilities, err)
 	}
 	downloaded, err := m.Download(context.Background(), providers.ModelDownloadRequest{
 		Model: modelConfig, TimeoutSeconds: 42, Now: func() time.Time { return fixed },
@@ -193,6 +197,10 @@ type recordingModelProvider struct {
 	generate    providers.ModelGenerateRequest
 	download    providers.ModelDownloadRequest
 	uninstall   providers.ModelUninstallRequest
+}
+
+func (p *recordingModelProvider) InputCapabilities(context.Context, providers.ModelConfig) (providers.ModelInputCapabilities, error) {
+	return providers.ModelInputCapabilities{Images: true, TextFiles: true}, nil
 }
 
 func (*recordingModelProvider) Kind() string { return "ollama" }

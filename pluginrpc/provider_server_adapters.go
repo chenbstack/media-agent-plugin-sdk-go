@@ -403,9 +403,27 @@ func (s *rpcServer) ModelGenerate(req ModelGenerateRequest, reply *JSONReply) er
 	progress, closeProgress := s.modelProgress(req.ProgressBrokerID)
 	defer closeProgress()
 	value, callErr := p.Generate(context.Background(), providers.ModelGenerateRequest{
-		Model: req.Model, Prompt: req.Prompt, MaxTokens: req.MaxTokens, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
+		Model: req.Model, Prompt: req.Prompt, Inputs: req.Inputs, MaxTokens: req.MaxTokens, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
 	})
 	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) ModelInputCapabilities(req ModelConfigRequest, reply *ModelInputCapabilitiesResult) error {
+	p, closeFn, err := s.model(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	detector, ok := p.(providers.ModelInputCapabilityProvider)
+	if !ok {
+		reply.Capabilities = providers.ModelInputCapabilities{}
+		return nil
+	}
+	value, err := detector.InputCapabilities(context.Background(), req.Model)
+	if err == nil {
+		reply.Capabilities = value
+	}
+	return err
 }
 
 func (s *rpcServer) ModelDownload(req ModelDownloadRequest, reply *JSONReply) error {

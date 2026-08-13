@@ -389,10 +389,15 @@ type ModelGenerateRequest struct {
 	Instance         InstancePayload
 	Model            providers.ModelConfig
 	Prompt           string
+	Inputs           []providers.ModelInput
 	MaxTokens        int
 	Now              time.Time
 	HasNow           bool
 	ProgressBrokerID uint32
+}
+
+type ModelInputCapabilitiesResult struct {
+	Capabilities providers.ModelInputCapabilities
 }
 
 type ModelDownloadRequest struct {

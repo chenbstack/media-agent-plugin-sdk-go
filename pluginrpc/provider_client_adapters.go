@@ -641,7 +641,7 @@ func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGen
 		if payloadErr != nil {
 			return payloadErr
 		}
-		wire := ModelGenerateRequest{Instance: instance, Model: request.Model, Prompt: request.Prompt, MaxTokens: request.MaxTokens}
+		wire := ModelGenerateRequest{Instance: instance, Model: request.Model, Prompt: request.Prompt, Inputs: request.Inputs, MaxTokens: request.MaxTokens}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
 		if request.Progress != nil {
 			wire.ProgressBrokerID = serveModelProgressSink(c.broker, request.Progress)
@@ -653,6 +653,18 @@ func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGen
 		return decodeJSON(reply.Data, &out)
 	})
 	return out, normalizeModelError(err)
+}
+
+func (p *modelProvider) InputCapabilities(ctx context.Context, model providers.ModelConfig) (providers.ModelInputCapabilities, error) {
+	var out ModelInputCapabilitiesResult
+	err := p.session.withClient(ctx, "model_provider.input_capabilities", func(c *Client) error {
+		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		if payloadErr != nil {
+			return payloadErr
+		}
+		return c.call(ctx, "Plugin.ModelInputCapabilities", ModelConfigRequest{Instance: instance, Model: model}, &out)
+	})
+	return out.Capabilities, normalizeModelError(err)
 }
 
 func (p *modelProvider) Download(ctx context.Context, request providers.ModelDownloadRequest) (providers.ModelDownloadResult, error) {
