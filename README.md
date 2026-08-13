@@ -6,7 +6,7 @@ The SDK is currently in the `v0.x` development phase. Pin a tagged version so
 host and plugin builds use the same contracts:
 
 ```bash
-go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.44.0
+go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.46.0
 ```
 
 ## Packages

@@ -123,10 +123,16 @@ func (c *Client) SubtitleSource(inst pluginsdk.Instance, secrets pluginsdk.Secre
 	return &subtitleSourceProvider{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
 }
 
-// Model creates a Pack-safe ModelProvider adapter. Model providers are not
-// instance-scoped, matching Plugin.NewModel's factory contract.
+// Model creates a legacy Pack-safe ModelProvider adapter without host context.
 func (c *Client) Model() providers.ModelProvider {
 	return &modelProvider{session: directProviderSession{client: c}}
+}
+
+// ModelWithInstance creates a Pack-safe ModelProvider adapter bound to the
+// plugin-global Instance. It carries Workspace and other granted host services
+// on every model RPC without putting host paths into model configuration.
+func (c *Client) ModelWithInstance(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) providers.ModelProvider {
+	return &modelProvider{session: directProviderSession{client: c}, inst: inst, secrets: secrets}
 }
 
 type downloaderProvider struct {
@@ -583,6 +589,8 @@ func (p *subtitleSourceProvider) withPayload(ctx context.Context, operation stri
 
 type modelProvider struct {
 	session  providerSession
+	inst     pluginsdk.Instance
+	secrets  pluginsdk.SecretResolver
 	kindOnce sync.Once
 	kind     string
 }
@@ -594,8 +602,12 @@ func (p *modelProvider) Kind() string {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_ = p.session.withClient(ctx, "model_provider.kind", func(c *Client) error {
+			instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+			if err != nil {
+				return err
+			}
 			var reply StringReply
-			if err := c.call(ctx, "Plugin.ModelKind", Empty{}, &reply); err != nil {
+			if err := c.call(ctx, "Plugin.ModelKind", instance, &reply); err != nil {
 				return err
 			}
 			p.kind = reply.Value
@@ -612,8 +624,12 @@ func (p *modelProvider) ValidateModel(model providers.ModelConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	err := p.session.withClient(ctx, "model_provider.validate", func(c *Client) error {
+		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		if payloadErr != nil {
+			return payloadErr
+		}
 		var reply Empty
-		return c.call(ctx, "Plugin.ModelValidate", ModelConfigRequest{Model: model}, &reply)
+		return c.call(ctx, "Plugin.ModelValidate", ModelConfigRequest{Instance: instance, Model: model}, &reply)
 	})
 	return normalizeModelError(err)
 }
@@ -621,8 +637,15 @@ func (p *modelProvider) ValidateModel(model providers.ModelConfig) error {
 func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGenerateRequest) (providers.ModelGenerateResult, error) {
 	var out providers.ModelGenerateResult
 	err := p.session.withClient(ctx, "model_provider.generate", func(c *Client) error {
-		wire := ModelGenerateRequest{Model: request.Model, Prompt: request.Prompt, MaxTokens: request.MaxTokens}
+		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		if payloadErr != nil {
+			return payloadErr
+		}
+		wire := ModelGenerateRequest{Instance: instance, Model: request.Model, Prompt: request.Prompt, MaxTokens: request.MaxTokens}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
+		if request.Progress != nil {
+			wire.ProgressBrokerID = serveModelProgressSink(c.broker, request.Progress)
+		}
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.ModelGenerate", wire, &reply); err != nil {
 			return err
@@ -635,8 +658,15 @@ func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGen
 func (p *modelProvider) Download(ctx context.Context, request providers.ModelDownloadRequest) (providers.ModelDownloadResult, error) {
 	var out providers.ModelDownloadResult
 	err := p.session.withClient(ctx, "model_provider.download", func(c *Client) error {
-		wire := ModelDownloadRequest{Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
+		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		if payloadErr != nil {
+			return payloadErr
+		}
+		wire := ModelDownloadRequest{Instance: instance, Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
+		if request.Progress != nil {
+			wire.ProgressBrokerID = serveModelProgressSink(c.broker, request.Progress)
+		}
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.ModelDownload", wire, &reply); err != nil {
 			return err
@@ -649,7 +679,11 @@ func (p *modelProvider) Download(ctx context.Context, request providers.ModelDow
 func (p *modelProvider) Uninstall(ctx context.Context, request providers.ModelUninstallRequest) (providers.ModelUninstallResult, error) {
 	var out providers.ModelUninstallResult
 	err := p.session.withClient(ctx, "model_provider.uninstall", func(c *Client) error {
-		wire := ModelUninstallRequest{Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
+		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		if payloadErr != nil {
+			return payloadErr
+		}
+		wire := ModelUninstallRequest{Instance: instance, Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.ModelUninstall", wire, &reply); err != nil {
@@ -665,8 +699,12 @@ func (p *modelProvider) CommandDisplay(model providers.ModelConfig) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	_ = p.session.withClient(ctx, "model_provider.command_display", func(c *Client) error {
+		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		if err != nil {
+			return err
+		}
 		var reply StringReply
-		if err := c.call(ctx, "Plugin.ModelCommandDisplay", ModelConfigRequest{Model: model}, &reply); err != nil {
+		if err := c.call(ctx, "Plugin.ModelCommandDisplay", ModelConfigRequest{Instance: instance, Model: model}, &reply); err != nil {
 			return err
 		}
 		out = reply.Value

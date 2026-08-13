@@ -61,6 +61,31 @@ type Manifest struct {
 	Permissions        Permissions               `yaml:"permissions" json:"permissions"`
 	Resources          Resources                 `yaml:"resources" json:"resources"`
 	Install            *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
+	ModelUI            *ModelUI                  `yaml:"model_ui,omitempty" json:"model_ui,omitempty"`
+}
+
+// ModelUI lets a model provider own the user-facing summary of its configured
+// models while the host keeps rendering, authorization and operation routing.
+// Values reference ModelConfig JSON fields and never execute plugin code.
+type ModelUI struct {
+	Description string                `yaml:"description" json:"description"`
+	Summary     []ModelUISummaryField `yaml:"summary" json:"summary"`
+	Download    *ModelUIOperation     `yaml:"download,omitempty" json:"download,omitempty"`
+	Uninstall   *ModelUIOperation     `yaml:"uninstall,omitempty" json:"uninstall,omitempty"`
+	SpeedTest   *ModelUIOperation     `yaml:"speed_test,omitempty" json:"speed_test,omitempty"`
+}
+
+type ModelUISummaryField struct {
+	Label       string `yaml:"label" json:"label"`
+	Field       string `yaml:"field,omitempty" json:"field,omitempty"`
+	Value       string `yaml:"value,omitempty" json:"value,omitempty"`
+	Format      string `yaml:"format,omitempty" json:"format,omitempty"` // text / model_file / host
+	DetailField string `yaml:"detail_field,omitempty" json:"detail_field,omitempty"`
+}
+
+type ModelUIOperation struct {
+	Label        string `yaml:"label" json:"label"`
+	PendingLabel string `yaml:"pending_label" json:"pending_label"`
 }
 
 type MembershipLevel string
@@ -615,13 +640,17 @@ type Plugin struct {
 	IconSVG []byte
 
 	// 工厂按能力可选实现；nil 表示插件不提供该类 Provider。
-	NewStorage              func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
-	NewDownloader           func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
-	NewMediaServer          func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
-	NewMetadata             func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
-	NewSite                 func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
-	NewCookieSource         func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.CookieSourceProvider, error)
-	NewModel                func() providers.ModelProvider
+	NewStorage      func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
+	NewDownloader   func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
+	NewMediaServer  func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MediaServerProvider, error)
+	NewMetadata     func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.MetadataProvider, error)
+	NewSite         func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SiteProvider, error)
+	NewCookieSource func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.CookieSourceProvider, error)
+	NewModel        func() providers.ModelProvider
+	// NewModelWithInstance 是带宿主上下文的模型工厂。模型 Provider 虽然不是用户创建的
+	// connection，也可能需要插件私有 Workspace 保存运行器和模型文件；宿主优先调用此
+	// 工厂，旧插件仍可只实现 NewModel。
+	NewModelWithInstance    func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.ModelProvider, error)
 	NewEventSubscriber      func(ctx context.Context, inst Instance, secrets SecretResolver) (EventSubscriber, error)
 	NewNotifier             func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.NotifierProvider, error)
 	NewSubtitleSource       func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.SubtitleSourceProvider, error)
@@ -660,11 +689,15 @@ type Plugin struct {
 	// 安装失败后可被反复调用，插件需自行清理半成品（如临时下载文件）。nil 表示插件无
 	// 需安装步骤。
 	Install func(ctx context.Context, progress io.Writer) (InstallResult, error)
+	// InstallWithInstance 与 Install 语义相同，但能访问宿主按插件权限分配的全局 Instance。
+	// 宿主优先调用它；没声明 workspace.local 时 inst.Workspace 为 nil。
+	InstallWithInstance func(ctx context.Context, inst Instance, progress io.Writer) (InstallResult, error)
 
 	// CheckInstall 查询插件是否已安装就绪，只读、无副作用、不触发下载。宿主在插件加载时
 	// 调用它决定初始安装状态（installed / pending），避免每次启动都执行安装动作。声明了
 	// lifecycle.install 的插件应实现它；nil 时宿主退化为把状态标记为 pending。
-	CheckInstall func(ctx context.Context) (InstallResult, error)
+	CheckInstall             func(ctx context.Context) (InstallResult, error)
+	CheckInstallWithInstance func(ctx context.Context, inst Instance) (InstallResult, error)
 
 	// Uninstall 卸载 Install 下载的资源（如引擎二进制），回收磁盘空间。宿主在用户手动
 	// 卸载、或停用插件时调用；同 Install 一样只转发、记录状态并展示进度（progress 按行
@@ -674,7 +707,8 @@ type Plugin struct {
 	// 上面的 Install/CheckInstall/Uninstall 对应"默认组件"（id 为空串）。声明了多个可安装
 	// 组件的插件（见 Manifest.Install.Components）把额外组件的钩子放进 InstallComponents，
 	// 按 ID 路由；宿主用 InstallHooks(id) 统一取用。
-	Uninstall func(ctx context.Context, progress io.Writer) (UninstallResult, error)
+	Uninstall             func(ctx context.Context, progress io.Writer) (UninstallResult, error)
+	UninstallWithInstance func(ctx context.Context, inst Instance, progress io.Writer) (UninstallResult, error)
 
 	// InstallComponents 是"非默认组件"的安装钩子集合，按 ID 匹配 Manifest.Install.Components。
 	InstallComponents []InstallComponent
@@ -683,20 +717,27 @@ type Plugin struct {
 // InstallComponent 是单个可安装组件的运行时钩子集合，语义同 Plugin.Install/CheckInstall/
 // Uninstall，但作用于指定 ID 的组件。Uninstall 为 nil 表示该组件资源不可卸载。
 type InstallComponent struct {
-	ID           string
-	Install      func(ctx context.Context, progress io.Writer) (InstallResult, error)
-	CheckInstall func(ctx context.Context) (InstallResult, error)
-	Uninstall    func(ctx context.Context, progress io.Writer) (UninstallResult, error)
+	ID                       string
+	Install                  func(ctx context.Context, progress io.Writer) (InstallResult, error)
+	InstallWithInstance      func(ctx context.Context, inst Instance, progress io.Writer) (InstallResult, error)
+	CheckInstall             func(ctx context.Context) (InstallResult, error)
+	CheckInstallWithInstance func(ctx context.Context, inst Instance) (InstallResult, error)
+	Uninstall                func(ctx context.Context, progress io.Writer) (UninstallResult, error)
+	UninstallWithInstance    func(ctx context.Context, inst Instance, progress io.Writer) (UninstallResult, error)
 }
 
 // InstallHooks 返回给定组件 ID 的安装钩子；空 ID 命中默认（Install/CheckInstall/Uninstall）。
 // ok 为 false 表示该组件不存在或未提供任何钩子。
 func (p Plugin) InstallHooks(component string) (InstallComponent, bool) {
 	if component == "" {
-		if p.Install == nil && p.CheckInstall == nil && p.Uninstall == nil {
+		if p.Install == nil && p.InstallWithInstance == nil && p.CheckInstall == nil && p.CheckInstallWithInstance == nil && p.Uninstall == nil && p.UninstallWithInstance == nil {
 			return InstallComponent{}, false
 		}
-		return InstallComponent{ID: "", Install: p.Install, CheckInstall: p.CheckInstall, Uninstall: p.Uninstall}, true
+		return InstallComponent{
+			ID: "", Install: p.Install, InstallWithInstance: p.InstallWithInstance,
+			CheckInstall: p.CheckInstall, CheckInstallWithInstance: p.CheckInstallWithInstance,
+			Uninstall: p.Uninstall, UninstallWithInstance: p.UninstallWithInstance,
+		}, true
 	}
 	for _, c := range p.InstallComponents {
 		if c.ID == component {
@@ -793,6 +834,9 @@ func (p Plugin) Validate() error {
 		}
 	}
 	if err := m.validateExtensions(capabilities); err != nil {
+		return err
+	}
+	if err := m.validateModelUI(capabilities); err != nil {
 		return err
 	}
 	seenActions := map[string]bool{}
@@ -904,6 +948,70 @@ func (p Plugin) Validate() error {
 }
 
 func (p Plugin) validate() error { return p.Validate() }
+
+func (m Manifest) validateModelUI(capabilities map[string]struct{}) error {
+	if m.ModelUI == nil {
+		return nil
+	}
+	if _, ok := capabilities["model_provider.generate"]; !ok {
+		return fmt.Errorf("插件 %s: model_ui 只能由模型提供方声明", m.ID)
+	}
+	ui := m.ModelUI
+	if strings.TrimSpace(ui.Description) == "" {
+		return fmt.Errorf("插件 %s: model_ui.description 不能为空", m.ID)
+	}
+	if len(ui.Summary) == 0 || len(ui.Summary) > 4 {
+		return fmt.Errorf("插件 %s: model_ui.summary 必须包含 1 至 4 个字段", m.ID)
+	}
+	allowedFields := map[string]bool{
+		"id": true, "name": true, "provider": true, "runtime": true, "backend": true,
+		"command": true, "model_path": true, "model_name": true, "base_url": true,
+		"api_key_env": true, "download_site": true, "download_url": true, "sha256": true,
+		"threads": true, "context_tokens": true, "default_max_tokens": true,
+	}
+	seenLabels := map[string]bool{}
+	for _, field := range ui.Summary {
+		label := strings.TrimSpace(field.Label)
+		name := strings.TrimSpace(field.Field)
+		value := strings.TrimSpace(field.Value)
+		if label == "" || (name == "") == (value == "") || (name != "" && !allowedFields[name]) {
+			return fmt.Errorf("插件 %s: model_ui.summary 字段声明无效", m.ID)
+		}
+		if seenLabels[label] {
+			return fmt.Errorf("插件 %s: model_ui.summary 标签重复 %q", m.ID, label)
+		}
+		seenLabels[label] = true
+		switch field.Format {
+		case "", "text", "model_file", "host":
+		default:
+			return fmt.Errorf("插件 %s: model_ui.summary format %q 不受支持", m.ID, field.Format)
+		}
+		if field.DetailField != "" && (name == "" || !allowedFields[field.DetailField]) {
+			return fmt.Errorf("插件 %s: model_ui.summary detail_field %q 不受支持", m.ID, field.DetailField)
+		}
+	}
+	operations := []struct {
+		name       string
+		capability string
+		definition *ModelUIOperation
+	}{
+		{name: "download", capability: "model_provider.download", definition: ui.Download},
+		{name: "uninstall", capability: "model_provider.uninstall", definition: ui.Uninstall},
+		{name: "speed_test", capability: "model_provider.speed_test", definition: ui.SpeedTest},
+	}
+	for _, operation := range operations {
+		if operation.definition == nil {
+			continue
+		}
+		if _, ok := capabilities[operation.capability]; !ok {
+			return fmt.Errorf("插件 %s: model_ui.%s 需要 capability %s", m.ID, operation.name, operation.capability)
+		}
+		if strings.TrimSpace(operation.definition.Label) == "" || strings.TrimSpace(operation.definition.PendingLabel) == "" {
+			return fmt.Errorf("插件 %s: model_ui.%s 必须声明 label 和 pending_label", m.ID, operation.name)
+		}
+	}
+	return nil
+}
 
 var manifestIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 

@@ -154,10 +154,10 @@ const (
 	//
 	// 对宿主它也不等于 queued：校验一个大种子要几分钟到几十分钟且速度必然是 0，
 	// 拿它去算"平均速度过低"会把一个好种子换掉。
-	DownloadChecking DownloadState = "checking"
-	DownloadPaused      DownloadState = "paused"
-	DownloadCompleted   DownloadState = "completed"
-	DownloadFailed      DownloadState = "failed"
+	DownloadChecking  DownloadState = "checking"
+	DownloadPaused    DownloadState = "paused"
+	DownloadCompleted DownloadState = "completed"
+	DownloadFailed    DownloadState = "failed"
 )
 
 type AddTorrentRequest struct {
@@ -499,7 +499,22 @@ type ModelGenerateRequest struct {
 	Prompt    string
 	MaxTokens int
 	Now       func() time.Time
+	Progress  ModelProgressFunc
 }
+
+// ModelProgress is a provider-reported snapshot for long-running model
+// operations. Current/Total use Unit (bytes or tokens); Speed is units/second.
+// Providers should report cumulative values and may omit Total when unknown.
+type ModelProgress struct {
+	Stage   string  `json:"stage"`
+	Message string  `json:"message,omitempty"`
+	Current int64   `json:"current,omitempty"`
+	Total   int64   `json:"total,omitempty"`
+	Unit    string  `json:"unit,omitempty"`
+	Speed   float64 `json:"speed,omitempty"`
+}
+
+type ModelProgressFunc func(ModelProgress)
 
 type ModelGenerateResult struct {
 	Output   string
@@ -512,6 +527,7 @@ type ModelDownloadRequest struct {
 	Model          ModelConfig
 	TimeoutSeconds int
 	Now            func() time.Time
+	Progress       ModelProgressFunc
 }
 
 type ModelDownloadResult struct {

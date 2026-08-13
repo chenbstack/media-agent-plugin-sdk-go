@@ -162,6 +162,7 @@ type ConfigRequest struct {
 // InstallRequest 指定要安装/检查/卸载的组件；Component 为空串表示默认组件。
 type InstallRequest struct {
 	Component string
+	Instance  InstancePayload
 }
 
 type FieldOptionsRequest struct {
@@ -385,21 +386,26 @@ type SubtitleDownloadRequest struct {
 // the transport evaluates the clock once and reconstructs a fixed clock in the
 // plugin process. Production callers normally leave Now nil.
 type ModelGenerateRequest struct {
-	Model     providers.ModelConfig
-	Prompt    string
-	MaxTokens int
-	Now       time.Time
-	HasNow    bool
+	Instance         InstancePayload
+	Model            providers.ModelConfig
+	Prompt           string
+	MaxTokens        int
+	Now              time.Time
+	HasNow           bool
+	ProgressBrokerID uint32
 }
 
 type ModelDownloadRequest struct {
-	Model          providers.ModelConfig
-	TimeoutSeconds int
-	Now            time.Time
-	HasNow         bool
+	Instance         InstancePayload
+	Model            providers.ModelConfig
+	TimeoutSeconds   int
+	Now              time.Time
+	HasNow           bool
+	ProgressBrokerID uint32
 }
 
 type ModelUninstallRequest struct {
+	Instance       InstancePayload
 	Model          providers.ModelConfig
 	TimeoutSeconds int
 	Now            time.Time
@@ -407,7 +413,8 @@ type ModelUninstallRequest struct {
 }
 
 type ModelConfigRequest struct {
-	Model providers.ModelConfig
+	Instance InstancePayload
+	Model    providers.ModelConfig
 }
 
 // APIHandleRequest wraps the host-filtered api.endpoint DTO with the plugin
@@ -996,6 +1003,9 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 		out.NewModel = func() providers.ModelProvider {
 			return &modelProvider{session: providerSession}
 		}
+		out.NewModelWithInstance = func(_ context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.ModelProvider, error) {
+			return &modelProvider{session: providerSession, inst: inst, secrets: secrets}, nil
+		}
 	}
 	if out.HasExactCapability(pluginsdk.CapabilityAPIEndpoint) {
 		out.NewAPI = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.APIProvider, error) {
@@ -1144,6 +1154,20 @@ func (e ExternalPlugin) installForwarders(component string) pluginsdk.InstallCom
 			})
 			return result, err
 		},
+		InstallWithInstance: func(ctx context.Context, inst pluginsdk.Instance, progress io.Writer) (pluginsdk.InstallResult, error) {
+			var result pluginsdk.InstallResult
+			callCtx, cancel := contextWithTimeout(ctx, externalPluginInstallTimeout)
+			defer cancel()
+			err := e.withClientOperationStderr(callCtx, "plugin.install", progress, func(c *Client) error {
+				got, err := c.InstallWithInstanceContext(callCtx, component, inst, nil)
+				if err != nil {
+					return err
+				}
+				result = got
+				return nil
+			})
+			return result, err
+		},
 		CheckInstall: func(ctx context.Context) (pluginsdk.InstallResult, error) {
 			var result pluginsdk.InstallResult
 			callCtx, cancel := contextWithTimeout(ctx, externalPluginAuthTimeout)
@@ -1158,12 +1182,40 @@ func (e ExternalPlugin) installForwarders(component string) pluginsdk.InstallCom
 			})
 			return result, err
 		},
+		CheckInstallWithInstance: func(ctx context.Context, inst pluginsdk.Instance) (pluginsdk.InstallResult, error) {
+			var result pluginsdk.InstallResult
+			callCtx, cancel := contextWithTimeout(ctx, externalPluginAuthTimeout)
+			defer cancel()
+			err := e.withClientOperation(callCtx, "plugin.check_install", func(c *Client) error {
+				got, err := c.CheckInstallWithInstanceContext(callCtx, component, inst, nil)
+				if err != nil {
+					return err
+				}
+				result = got
+				return nil
+			})
+			return result, err
+		},
 		Uninstall: func(ctx context.Context, progress io.Writer) (pluginsdk.UninstallResult, error) {
 			var result pluginsdk.UninstallResult
 			callCtx, cancel := contextWithTimeout(ctx, externalPluginInstallTimeout)
 			defer cancel()
 			err := e.withClientOperationStderr(callCtx, "plugin.uninstall", progress, func(c *Client) error {
 				got, err := c.UninstallContext(callCtx, component)
+				if err != nil {
+					return err
+				}
+				result = got
+				return nil
+			})
+			return result, err
+		},
+		UninstallWithInstance: func(ctx context.Context, inst pluginsdk.Instance, progress io.Writer) (pluginsdk.UninstallResult, error) {
+			var result pluginsdk.UninstallResult
+			callCtx, cancel := contextWithTimeout(ctx, externalPluginInstallTimeout)
+			defer cancel()
+			err := e.withClientOperationStderr(callCtx, "plugin.uninstall", progress, func(c *Client) error {
+				got, err := c.UninstallWithInstanceContext(callCtx, component, inst, nil)
 				if err != nil {
 					return err
 				}
@@ -1325,6 +1377,26 @@ func serveProgressSink(broker *hcplugin.MuxBroker, progress providers.ProgressFu
 				return
 			}
 			progress(int64(binary.BigEndian.Uint64(buf)))
+		}
+	}()
+	return id
+}
+
+func serveModelProgressSink(broker *hcplugin.MuxBroker, progress providers.ModelProgressFunc) uint32 {
+	id := broker.NextId()
+	go func() {
+		conn, err := broker.Accept(id)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		decoder := json.NewDecoder(conn)
+		for {
+			var snapshot providers.ModelProgress
+			if err := decoder.Decode(&snapshot); err != nil {
+				return
+			}
+			progress(snapshot)
 		}
 	}()
 	return id

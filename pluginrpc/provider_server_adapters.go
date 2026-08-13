@@ -2,7 +2,9 @@ package pluginrpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
@@ -373,50 +375,76 @@ func (s *rpcServer) SubtitleSourceDownload(req SubtitleDownloadRequest, reply *J
 	return setJSONReply(reply, value, callErr)
 }
 
-func (s *rpcServer) ModelKind(_ Empty, reply *StringReply) error {
-	p, err := s.model()
+func (s *rpcServer) ModelKind(instance InstancePayload, reply *StringReply) error {
+	p, closeFn, err := s.model(instance)
 	if err != nil {
 		return err
 	}
+	defer closeFn()
 	reply.Value = p.Kind()
 	return nil
 }
 
 func (s *rpcServer) ModelValidate(req ModelConfigRequest, _ *Empty) error {
-	p, err := s.model()
+	p, closeFn, err := s.model(req.Instance)
 	if err != nil {
 		return err
 	}
+	defer closeFn()
 	return p.ValidateModel(req.Model)
 }
 
 func (s *rpcServer) ModelGenerate(req ModelGenerateRequest, reply *JSONReply) error {
-	p, err := s.model()
+	p, closeFn, err := s.model(req.Instance)
 	if err != nil {
 		return err
 	}
+	defer closeFn()
+	progress, closeProgress := s.modelProgress(req.ProgressBrokerID)
+	defer closeProgress()
 	value, callErr := p.Generate(context.Background(), providers.ModelGenerateRequest{
-		Model: req.Model, Prompt: req.Prompt, MaxTokens: req.MaxTokens, Now: restoreClock(req.Now, req.HasNow),
+		Model: req.Model, Prompt: req.Prompt, MaxTokens: req.MaxTokens, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
 	})
 	return setJSONReply(reply, value, callErr)
 }
 
 func (s *rpcServer) ModelDownload(req ModelDownloadRequest, reply *JSONReply) error {
-	p, err := s.model()
+	p, closeFn, err := s.model(req.Instance)
 	if err != nil {
 		return err
 	}
+	defer closeFn()
+	progress, closeProgress := s.modelProgress(req.ProgressBrokerID)
+	defer closeProgress()
 	value, callErr := p.Download(context.Background(), providers.ModelDownloadRequest{
-		Model: req.Model, TimeoutSeconds: req.TimeoutSeconds, Now: restoreClock(req.Now, req.HasNow),
+		Model: req.Model, TimeoutSeconds: req.TimeoutSeconds, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
 	})
 	return setJSONReply(reply, value, callErr)
 }
 
+func (s *rpcServer) modelProgress(brokerID uint32) (providers.ModelProgressFunc, func()) {
+	if brokerID == 0 {
+		return nil, func() {}
+	}
+	conn, err := s.broker.Dial(brokerID)
+	if err != nil {
+		return nil, func() {}
+	}
+	encoder := json.NewEncoder(conn)
+	var mu sync.Mutex
+	return func(snapshot providers.ModelProgress) {
+		mu.Lock()
+		defer mu.Unlock()
+		_ = encoder.Encode(snapshot)
+	}, func() { _ = conn.Close() }
+}
+
 func (s *rpcServer) ModelUninstall(req ModelUninstallRequest, reply *JSONReply) error {
-	p, err := s.model()
+	p, closeFn, err := s.model(req.Instance)
 	if err != nil {
 		return err
 	}
+	defer closeFn()
 	value, callErr := p.Uninstall(context.Background(), providers.ModelUninstallRequest{
 		Model: req.Model, TimeoutSeconds: req.TimeoutSeconds, Now: restoreClock(req.Now, req.HasNow),
 	})
@@ -424,10 +452,11 @@ func (s *rpcServer) ModelUninstall(req ModelUninstallRequest, reply *JSONReply) 
 }
 
 func (s *rpcServer) ModelCommandDisplay(req ModelConfigRequest, reply *StringReply) error {
-	p, err := s.model()
+	p, closeFn, err := s.model(req.Instance)
 	if err != nil {
 		return err
 	}
+	defer closeFn()
 	reply.Value = p.CommandDisplay(req.Model)
 	return nil
 }
@@ -540,15 +569,31 @@ func (s *rpcServer) subtitleSource(payload InstancePayload) (providers.SubtitleS
 	return provider, closeFn, nil
 }
 
-func (s *rpcServer) model() (providers.ModelProvider, error) {
-	if s.plugin.NewModel == nil {
-		return nil, fmt.Errorf("插件未实现 ModelProvider")
+func (s *rpcServer) model(payload InstancePayload) (providers.ModelProvider, func(), error) {
+	if s.plugin.NewModel == nil && s.plugin.NewModelWithInstance == nil {
+		return nil, nil, fmt.Errorf("插件未实现 ModelProvider")
 	}
-	provider := s.plugin.NewModel()
+	closeFn := func() {}
+	var provider providers.ModelProvider
+	if s.plugin.NewModelWithInstance != nil {
+		inst, secrets, closeInstance, err := s.instance(payload)
+		if err != nil {
+			return nil, nil, err
+		}
+		closeFn = closeInstance
+		provider, err = s.plugin.NewModelWithInstance(context.Background(), inst, secrets)
+		if err != nil {
+			closeFn()
+			return nil, nil, err
+		}
+	} else {
+		provider = s.plugin.NewModel()
+	}
 	if provider == nil {
-		return nil, fmt.Errorf("插件返回了空 ModelProvider")
+		closeFn()
+		return nil, nil, fmt.Errorf("插件返回了空 ModelProvider")
 	}
-	return provider, nil
+	return provider, closeFn, nil
 }
 
 func restoreClock(now time.Time, ok bool) func() time.Time {

@@ -49,12 +49,23 @@ func (s *rpcServer) ConfigSchema(args Empty, reply *JSONReply) error {
 
 func (s *rpcServer) Install(req InstallRequest, reply *JSONReply) error {
 	hooks, ok := s.plugin.InstallHooks(req.Component)
-	if !ok || hooks.Install == nil {
+	if !ok || (hooks.Install == nil && hooks.InstallWithInstance == nil) {
 		return fmt.Errorf("插件未实现组件 %q 的安装步骤", req.Component)
 	}
 	// 进度写到插件进程自身的 stderr；go-plugin 经 SyncStderr 实时转发给宿主，
 	// 宿主再喂给前端展示。这样单次阻塞 RPC 也能呈现实时进度。
-	result, err := hooks.Install(context.Background(), os.Stderr)
+	var result pluginsdk.InstallResult
+	var err error
+	if hooks.InstallWithInstance != nil {
+		inst, _, closeFn, instanceErr := s.instance(req.Instance)
+		if instanceErr != nil {
+			return instanceErr
+		}
+		defer closeFn()
+		result, err = hooks.InstallWithInstance(context.Background(), inst, os.Stderr)
+	} else {
+		result, err = hooks.Install(context.Background(), os.Stderr)
+	}
 	if err != nil {
 		return err
 	}
@@ -68,10 +79,21 @@ func (s *rpcServer) Install(req InstallRequest, reply *JSONReply) error {
 
 func (s *rpcServer) CheckInstall(req InstallRequest, reply *JSONReply) error {
 	hooks, ok := s.plugin.InstallHooks(req.Component)
-	if !ok || hooks.CheckInstall == nil {
+	if !ok || (hooks.CheckInstall == nil && hooks.CheckInstallWithInstance == nil) {
 		return fmt.Errorf("插件未实现组件 %q 的安装检查", req.Component)
 	}
-	result, err := hooks.CheckInstall(context.Background())
+	var result pluginsdk.InstallResult
+	var err error
+	if hooks.CheckInstallWithInstance != nil {
+		inst, _, closeFn, instanceErr := s.instance(req.Instance)
+		if instanceErr != nil {
+			return instanceErr
+		}
+		defer closeFn()
+		result, err = hooks.CheckInstallWithInstance(context.Background(), inst)
+	} else {
+		result, err = hooks.CheckInstall(context.Background())
+	}
 	if err != nil {
 		return err
 	}
@@ -85,11 +107,22 @@ func (s *rpcServer) CheckInstall(req InstallRequest, reply *JSONReply) error {
 
 func (s *rpcServer) Uninstall(req InstallRequest, reply *JSONReply) error {
 	hooks, ok := s.plugin.InstallHooks(req.Component)
-	if !ok || hooks.Uninstall == nil {
+	if !ok || (hooks.Uninstall == nil && hooks.UninstallWithInstance == nil) {
 		return fmt.Errorf("插件未实现组件 %q 的资源卸载", req.Component)
 	}
 	// 卸载进度同安装：写插件进程 stderr，go-plugin 实时转发给宿主。
-	result, err := hooks.Uninstall(context.Background(), os.Stderr)
+	var result pluginsdk.UninstallResult
+	var err error
+	if hooks.UninstallWithInstance != nil {
+		inst, _, closeFn, instanceErr := s.instance(req.Instance)
+		if instanceErr != nil {
+			return instanceErr
+		}
+		defer closeFn()
+		result, err = hooks.UninstallWithInstance(context.Background(), inst, os.Stderr)
+	} else {
+		result, err = hooks.Uninstall(context.Background(), os.Stderr)
+	}
 	if err != nil {
 		return err
 	}

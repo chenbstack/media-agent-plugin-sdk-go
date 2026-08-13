@@ -107,6 +107,27 @@ func TestExtendedProviderAdaptersUseDispensedClient(t *testing.T) {
 	}
 }
 
+func TestModelWithInstanceForwardsWorkspaceToFactory(t *testing.T) {
+	var gotWorkspace string
+	model := &recordingModelProvider{}
+	plugin := pluginsdk.Plugin{
+		Manifest: pluginsdk.Manifest{ID: "workspace-model", Name: "Workspace model"},
+		NewModelWithInstance: func(_ context.Context, inst pluginsdk.Instance, _ pluginsdk.SecretResolver) (providers.ModelProvider, error) {
+			gotWorkspace = inst.Workspace.Root()
+			return model, nil
+		},
+	}
+	client := newProviderTestClient(t, plugin)
+	want := t.TempDir()
+	provider := client.ModelWithInstance(pluginsdk.Instance{ID: "global", Workspace: pluginsdk.NewWorkspace(want)}, nil)
+	if provider.Kind() != "ollama" {
+		t.Fatalf("kind = %q", provider.Kind())
+	}
+	if gotWorkspace != want {
+		t.Fatalf("workspace = %q, want %q", gotWorkspace, want)
+	}
+}
+
 func TestExternalPluginBuildsExtendedProviderFactoriesFromCapabilities(t *testing.T) {
 	plugin := (ExternalPlugin{Manifest: pluginsdk.Manifest{
 		ID: "official-tools",

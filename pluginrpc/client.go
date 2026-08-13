@@ -36,8 +36,16 @@ func (c *Client) ConfigSchema() (pluginsdk.ConfigSchema, error) {
 }
 
 func (c *Client) InstallContext(ctx context.Context, component string) (pluginsdk.InstallResult, error) {
+	return c.InstallWithInstanceContext(ctx, component, pluginsdk.Instance{}, nil)
+}
+
+func (c *Client) InstallWithInstanceContext(ctx context.Context, component string, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.InstallResult, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.InstallResult{}, err
+	}
 	var reply JSONReply
-	if err := c.call(ctx, "Plugin.Install", InstallRequest{Component: component}, &reply); err != nil {
+	if err := c.call(ctx, "Plugin.Install", InstallRequest{Component: component, Instance: payload}, &reply); err != nil {
 		return pluginsdk.InstallResult{}, err
 	}
 	var out pluginsdk.InstallResult
@@ -48,8 +56,16 @@ func (c *Client) InstallContext(ctx context.Context, component string) (pluginsd
 }
 
 func (c *Client) CheckInstallContext(ctx context.Context, component string) (pluginsdk.InstallResult, error) {
+	return c.CheckInstallWithInstanceContext(ctx, component, pluginsdk.Instance{}, nil)
+}
+
+func (c *Client) CheckInstallWithInstanceContext(ctx context.Context, component string, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.InstallResult, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.InstallResult{}, err
+	}
 	var reply JSONReply
-	if err := c.call(ctx, "Plugin.CheckInstall", InstallRequest{Component: component}, &reply); err != nil {
+	if err := c.call(ctx, "Plugin.CheckInstall", InstallRequest{Component: component, Instance: payload}, &reply); err != nil {
 		return pluginsdk.InstallResult{}, err
 	}
 	var out pluginsdk.InstallResult
@@ -60,8 +76,16 @@ func (c *Client) CheckInstallContext(ctx context.Context, component string) (plu
 }
 
 func (c *Client) UninstallContext(ctx context.Context, component string) (pluginsdk.UninstallResult, error) {
+	return c.UninstallWithInstanceContext(ctx, component, pluginsdk.Instance{}, nil)
+}
+
+func (c *Client) UninstallWithInstanceContext(ctx context.Context, component string, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.UninstallResult, error) {
+	payload, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.UninstallResult{}, err
+	}
 	var reply JSONReply
-	if err := c.call(ctx, "Plugin.Uninstall", InstallRequest{Component: component}, &reply); err != nil {
+	if err := c.call(ctx, "Plugin.Uninstall", InstallRequest{Component: component, Instance: payload}, &reply); err != nil {
 		return pluginsdk.UninstallResult{}, err
 	}
 	var out pluginsdk.UninstallResult
