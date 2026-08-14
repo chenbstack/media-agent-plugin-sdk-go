@@ -96,8 +96,12 @@ type EpisodeSelection struct {
 }
 
 type SubscriptionWrite struct {
-	TargetID                string             `json:"target_id,omitempty"`
-	IdempotencyKey          string             `json:"idempotency_key"`
+	TargetID       string `json:"target_id,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+	// OwnerID asks the host to create or merge the subscription for this user.
+	// Hosts must reject cross-user attribution unless the plugin was explicitly
+	// granted the dedicated create-for-user permission.
+	OwnerID                 string             `json:"owner_id,omitempty"`
 	Media                   MediaIdentity      `json:"media"`
 	Season                  int                `json:"season,omitempty"`
 	TotalEpisodes           int                `json:"total_episodes,omitempty"`
