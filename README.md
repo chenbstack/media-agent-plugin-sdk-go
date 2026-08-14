@@ -24,6 +24,8 @@ go get github.com/chenbstack/media-agent-plugin-sdk-go@v0.46.0
 
 模型 Provider 可选实现 `providers.ModelInputCapabilityProvider`，按具体模型返回 `Images` / `TextFiles` 能力；未实现或探测失败时宿主按纯文本模型处理。经宿主校验的本轮图片和文本文件通过 `ModelGenerateRequest.Inputs` 传入，Provider 不应自行读取客户端路径。
 
+当 `ModelGenerateRequest.IncludeReasoning` 为 true 时，支持推理过程的 Provider 应把模型明确返回的 reasoning 放在 `ModelGenerateResult.Reasoning`，并通过 `ModelProgress{Stage: "thinking", Delta: ...}` 增量上报；最终回答仍只放在 `Output`。不支持 reasoning 的 Provider 留空即可，不能从最终回答反推或伪造思考内容。
+
 The initial RPC handshake uses protocol version 1. Incompatible wire changes
 must increment that protocol version. While the Go API is below `v1.0.0`,
 breaking source changes are released under a new `v0.x` minor version and must

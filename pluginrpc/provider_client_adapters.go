@@ -641,7 +641,7 @@ func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGen
 		if payloadErr != nil {
 			return payloadErr
 		}
-		wire := ModelGenerateRequest{Instance: instance, Model: request.Model, Prompt: request.Prompt, Inputs: request.Inputs, MaxTokens: request.MaxTokens}
+		wire := ModelGenerateRequest{Instance: instance, Model: request.Model, Prompt: request.Prompt, Inputs: request.Inputs, MaxTokens: request.MaxTokens, IncludeReasoning: request.IncludeReasoning}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
 		if request.Progress != nil {
 			wire.ProgressBrokerID = serveModelProgressSink(c.broker, request.Progress)

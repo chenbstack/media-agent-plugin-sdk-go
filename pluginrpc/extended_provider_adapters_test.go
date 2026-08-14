@@ -82,12 +82,12 @@ func TestExtendedProviderAdaptersUseDispensedClient(t *testing.T) {
 	model.validateErr = nil
 	fixed := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
 	generated, err := m.Generate(context.Background(), providers.ModelGenerateRequest{
-		Model: modelConfig, Prompt: "hello", Inputs: []providers.ModelInput{{Kind: "image", Name: "shot.png", MIMEType: "image/png", Data: []byte{1, 2}}}, MaxTokens: 32, Now: func() time.Time { return fixed },
+		Model: modelConfig, Prompt: "hello", Inputs: []providers.ModelInput{{Kind: "image", Name: "shot.png", MIMEType: "image/png", Data: []byte{1, 2}}}, MaxTokens: 32, IncludeReasoning: true, Now: func() time.Time { return fixed },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if generated.Output != "generated" || !generated.Started.Equal(fixed) || model.generate.Prompt != "hello" || len(model.generate.Inputs) != 1 || model.generate.Inputs[0].Name != "shot.png" || model.generate.Now == nil || !model.generate.Now().Equal(fixed) {
+	if generated.Output != "generated" || generated.Reasoning != "reasoning" || !generated.Started.Equal(fixed) || model.generate.Prompt != "hello" || len(model.generate.Inputs) != 1 || model.generate.Inputs[0].Name != "shot.png" || !model.generate.IncludeReasoning || model.generate.Now == nil || !model.generate.Now().Equal(fixed) {
 		t.Fatalf("model generate = %#v, recorded=%#v", generated, model.generate)
 	}
 	capabilities, err := m.(providers.ModelInputCapabilityProvider).InputCapabilities(context.Background(), modelConfig)
@@ -214,7 +214,7 @@ func (p *recordingModelProvider) Generate(_ context.Context, request providers.M
 	if request.Now != nil {
 		now = request.Now()
 	}
-	return providers.ModelGenerateResult{Output: "generated", Started: now, Finished: now}, nil
+	return providers.ModelGenerateResult{Output: "generated", Reasoning: "reasoning", Started: now, Finished: now}, nil
 }
 func (p *recordingModelProvider) Download(_ context.Context, request providers.ModelDownloadRequest) (providers.ModelDownloadResult, error) {
 	p.download = request

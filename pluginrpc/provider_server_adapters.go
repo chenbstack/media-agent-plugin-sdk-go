@@ -403,7 +403,7 @@ func (s *rpcServer) ModelGenerate(req ModelGenerateRequest, reply *JSONReply) er
 	progress, closeProgress := s.modelProgress(req.ProgressBrokerID)
 	defer closeProgress()
 	value, callErr := p.Generate(context.Background(), providers.ModelGenerateRequest{
-		Model: req.Model, Prompt: req.Prompt, Inputs: req.Inputs, MaxTokens: req.MaxTokens, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
+		Model: req.Model, Prompt: req.Prompt, Inputs: req.Inputs, MaxTokens: req.MaxTokens, IncludeReasoning: req.IncludeReasoning, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
 	})
 	return setJSONReply(reply, value, callErr)
 }

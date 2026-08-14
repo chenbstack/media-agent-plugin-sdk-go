@@ -391,6 +391,7 @@ type ModelGenerateRequest struct {
 	Prompt           string
 	Inputs           []providers.ModelInput
 	MaxTokens        int
+	IncludeReasoning bool
 	Now              time.Time
 	HasNow           bool
 	ProgressBrokerID uint32

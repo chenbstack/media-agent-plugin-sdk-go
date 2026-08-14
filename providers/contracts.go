@@ -496,12 +496,13 @@ type ModelConfig struct {
 }
 
 type ModelGenerateRequest struct {
-	Model     ModelConfig
-	Prompt    string
-	Inputs    []ModelInput
-	MaxTokens int
-	Now       func() time.Time
-	Progress  ModelProgressFunc
+	Model            ModelConfig
+	Prompt           string
+	Inputs           []ModelInput
+	MaxTokens        int
+	IncludeReasoning bool
+	Now              func() time.Time
+	Progress         ModelProgressFunc
 }
 
 // ModelInput is bounded user-supplied context for one generation request.
@@ -531,6 +532,7 @@ type ModelInputCapabilityProvider interface {
 type ModelProgress struct {
 	Stage   string  `json:"stage"`
 	Message string  `json:"message,omitempty"`
+	Delta   string  `json:"delta,omitempty"`
 	Current int64   `json:"current,omitempty"`
 	Total   int64   `json:"total,omitempty"`
 	Unit    string  `json:"unit,omitempty"`
@@ -540,10 +542,11 @@ type ModelProgress struct {
 type ModelProgressFunc func(ModelProgress)
 
 type ModelGenerateResult struct {
-	Output   string
-	Stderr   string
-	Started  time.Time
-	Finished time.Time
+	Output    string
+	Reasoning string
+	Stderr    string
+	Started   time.Time
+	Finished  time.Time
 }
 
 type ModelDownloadRequest struct {
