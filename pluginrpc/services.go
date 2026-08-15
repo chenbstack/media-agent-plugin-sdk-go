@@ -628,7 +628,7 @@ func (s *hostServicesServer) UpsertSubscription(req SubscriptionUpsertRequest, r
 	if s.subscriptions == nil {
 		return fmt.Errorf("宿主未提供 Subscriptions")
 	}
-	if err := s.requireHostPermission("subscriptions.write"); err != nil {
+	if err := s.requireSubscriptionPermission(); err != nil {
 		return err
 	}
 	result, err := s.subscriptions.UpsertSubscription(s.ctx, req.Input)
@@ -641,6 +641,18 @@ func (s *hostServicesServer) UpsertSubscription(req SubscriptionUpsertRequest, r
 	}
 	*reply = out
 	return nil
+}
+
+// requireSubscriptionPermission keeps the RPC transport compatible with both
+// the formal subscription workflow and legacy import plugins. New manifests
+// declare subscriptions.create; only plugins that still declare the removed
+// subscriptions.write permission use the legacy path, which the host can
+// reject with its explicit deprecation error.
+func (s *hostServicesServer) requireSubscriptionPermission() error {
+	if s.permissions.HasHost("subscriptions.create") {
+		return s.requireHostPermission("subscriptions.create")
+	}
+	return s.requireHostPermission("subscriptions.write")
 }
 
 func (s *hostServicesServer) UpsertDownload(req DownloadUpsertRequest, reply *JSONReply) error {

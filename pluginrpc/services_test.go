@@ -177,6 +177,19 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 	}
 }
 
+func TestHostServicesUseFormalSubscriptionPermission(t *testing.T) {
+	server := hostServicesServer{
+		ctx:           context.Background(),
+		subscriptions: memorySubscriptions{},
+		permissions:   pluginsdk.Permissions{Host: []string{"subscriptions.create"}},
+	}
+
+	var reply JSONReply
+	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &reply); err != nil {
+		t.Fatalf("UpsertSubscription with subscriptions.create: %v", err)
+	}
+}
+
 func TestHostServicesRequireConnectionCredentialPermission(t *testing.T) {
 	server := hostServicesServer{ctx: context.Background(), connectionCredentials: memoryResources{}}
 	var reply StringReply
