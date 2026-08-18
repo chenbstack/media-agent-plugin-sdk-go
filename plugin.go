@@ -63,6 +63,7 @@ type Manifest struct {
 	Permissions        Permissions               `yaml:"permissions" json:"permissions"`
 	Resources          Resources                 `yaml:"resources" json:"resources"`
 	Install            *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
+	ModelBackend       string                    `yaml:"model_backend,omitempty" json:"model_backend,omitempty"`
 	ModelUI            *ModelUI                  `yaml:"model_ui,omitempty" json:"model_ui,omitempty"`
 }
 
@@ -686,6 +687,11 @@ type Plugin struct {
 	// IconSVG 是插件图标（SVG 内容），可为空；由宿主经 /plugins/{id}/icon 提供给前端。
 	IconSVG []byte
 
+	// Schema 声明插件私有库的表结构。宿主每次启动把实际结构对齐到这里的声明，
+	// 插件不需要自己建表或写迁移。声明同时是查询编译器的白名单：只有这里出现过的
+	// 表和列，插件的查询才引用得到。零值表示插件不使用私有库。
+	Schema DBSchema
+
 	// 工厂按能力可选实现；nil 表示插件不提供该类 Provider。
 	NewStorage      func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
 	NewDownloader   func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.DownloaderProvider, error)
@@ -990,6 +996,9 @@ func (p Plugin) Validate() error {
 			}
 			seenMethods[method] = struct{}{}
 		}
+	}
+	if err := p.Schema.Validate(); err != nil {
+		return fmt.Errorf("插件 %s 的私有表声明无效: %w", m.ID, err)
 	}
 	return p.ConfigSchema.validate(m.ID)
 }

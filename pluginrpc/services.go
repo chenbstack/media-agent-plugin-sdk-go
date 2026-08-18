@@ -142,52 +142,70 @@ func (s *hostServicesServer) KVDeletePrefix(req KVGetRequest, reply *Empty) erro
 	return s.kv.DeletePrefix(s.ctx, req.Key)
 }
 
-type DBTableNameRequest struct {
-	LogicalName string
+// DBStatementRequest 承载一条结构化语句。语句里含 any 类型的绑定值，gob 编不了，
+// 所以按 JSON 传——与 KV / 宿主写入通道的做法一致。
+type DBStatementRequest struct {
+	QueryJSON []byte
 }
 
-func (s *hostServicesServer) DBTableName(req DBTableNameRequest, reply *StringReply) error {
-	if s.db == nil {
-		return fmt.Errorf("宿主未提供 PluginDB")
-	}
-	if err := s.requireDataPermission("storage"); err != nil {
-		return err
-	}
-	name, err := s.db.TableName(req.LogicalName)
-	if err != nil {
-		return err
-	}
-	reply.Value = name
-	return nil
-}
-
-type DBExecRequest struct {
-	Statement string
-	ArgsJSON  []byte
-}
-
-type DBExecReply struct {
+// DBWriteReply 是 Insert / Update / Delete 的结果。
+type DBWriteReply struct {
 	RowsAffected int64
 	LastInsertID int64
 }
 
-func (s *hostServicesServer) DBExec(req DBExecRequest, reply *DBExecReply) error {
+func (s *hostServicesServer) requireDB() error {
 	if s.db == nil {
 		return fmt.Errorf("宿主未提供 PluginDB")
 	}
-	if err := s.requireDataPermission("storage"); err != nil {
+	return s.requireDataPermission("storage")
+}
+
+func (s *hostServicesServer) DBInsert(req DBStatementRequest, reply *DBWriteReply) error {
+	if err := s.requireDB(); err != nil {
 		return err
 	}
-	args, err := decodeDBArgs(req.ArgsJSON)
+	var query pluginsdk.Insert
+	if err := decodeDBStatement(req.QueryJSON, &query); err != nil {
+		return err
+	}
+	result, err := s.db.Insert(s.ctx, query)
 	if err != nil {
 		return err
 	}
-	result, err := s.db.Exec(s.ctx, req.Statement, args...)
+	reply.RowsAffected, reply.LastInsertID = result.RowsAffected, result.LastInsertID
+	return nil
+}
+
+func (s *hostServicesServer) DBUpdate(req DBStatementRequest, reply *DBWriteReply) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
+	var query pluginsdk.Update
+	if err := decodeDBStatement(req.QueryJSON, &query); err != nil {
+		return err
+	}
+	result, err := s.db.Update(s.ctx, query)
 	if err != nil {
 		return err
 	}
-	reply.RowsAffected = result.RowsAffected
-	reply.LastInsertID = result.LastInsertID
+	reply.RowsAffected, reply.LastInsertID = result.RowsAffected, result.LastInsertID
+	return nil
+}
+
+func (s *hostServicesServer) DBDelete(req DBStatementRequest, reply *DBWriteReply) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
+	var query pluginsdk.Delete
+	if err := decodeDBStatement(req.QueryJSON, &query); err != nil {
+		return err
+	}
+	result, err := s.db.Delete(s.ctx, query)
+	if err != nil {
+		return err
+	}
+	reply.RowsAffected, reply.LastInsertID = result.RowsAffected, result.LastInsertID
 	return nil
 }
 
@@ -785,18 +803,15 @@ func (s *hostServicesServer) SetRuleDefault(req RuleDefaultSetRequest, reply *JS
 	return nil
 }
 
-func (s *hostServicesServer) DBQuery(req DBExecRequest, reply *DBQueryReply) error {
-	if s.db == nil {
-		return fmt.Errorf("宿主未提供 PluginDB")
-	}
-	if err := s.requireDataPermission("storage"); err != nil {
+func (s *hostServicesServer) DBSelect(req DBStatementRequest, reply *DBQueryReply) error {
+	if err := s.requireDB(); err != nil {
 		return err
 	}
-	args, err := decodeDBArgs(req.ArgsJSON)
-	if err != nil {
+	var query pluginsdk.Select
+	if err := decodeDBStatement(req.QueryJSON, &query); err != nil {
 		return err
 	}
-	rows, err := s.db.Query(s.ctx, req.Statement, args...)
+	rows, err := s.db.Select(s.ctx, query)
 	if err != nil {
 		return err
 	}
@@ -938,36 +953,46 @@ func (c *hostServicesClient) DeletePrefix(ctx context.Context, prefix string) er
 	return c.client.Call("Plugin.KVDeletePrefix", KVGetRequest{Key: prefix}, &reply)
 }
 
-func (c *hostServicesClient) TableName(logicalName string) (string, error) {
-	var reply StringReply
-	if err := c.client.Call("Plugin.DBTableName", DBTableNameRequest{LogicalName: logicalName}, &reply); err != nil {
-		return "", err
-	}
-	return reply.Value, nil
+// dbServicesClient 单独承载 PluginDB。它和 hostServicesClient 共用同一条 RPC 连接，
+// 分成两个类型只因为方法名会撞：KVStore 和 PluginDB 都有 Delete。
+type dbServicesClient struct {
+	client *rpc.Client
 }
 
-func (c *hostServicesClient) Exec(ctx context.Context, statement string, args ...any) (pluginsdk.DBResult, error) {
-	argsJSON, err := encodeDBArgs(args)
-	if err != nil {
-		return pluginsdk.DBResult{}, err
-	}
-	var reply DBExecReply
-	if err := c.client.Call("Plugin.DBExec", DBExecRequest{Statement: statement, ArgsJSON: argsJSON}, &reply); err != nil {
-		return pluginsdk.DBResult{}, err
-	}
-	return pluginsdk.DBResult{RowsAffected: reply.RowsAffected, LastInsertID: reply.LastInsertID}, nil
-}
-
-func (c *hostServicesClient) Query(ctx context.Context, statement string, args ...any) ([]map[string]any, error) {
-	argsJSON, err := encodeDBArgs(args)
+func (c *dbServicesClient) Select(ctx context.Context, query pluginsdk.Select) ([]map[string]any, error) {
+	payload, err := json.Marshal(query)
 	if err != nil {
 		return nil, err
 	}
 	var reply DBQueryReply
-	if err := c.client.Call("Plugin.DBQuery", DBExecRequest{Statement: statement, ArgsJSON: argsJSON}, &reply); err != nil {
+	if err := c.client.Call("Plugin.DBSelect", DBStatementRequest{QueryJSON: payload}, &reply); err != nil {
 		return nil, err
 	}
 	return decodeDBRows(reply.RowsJSON)
+}
+
+func (c *dbServicesClient) Insert(ctx context.Context, query pluginsdk.Insert) (pluginsdk.DBResult, error) {
+	return c.dbWrite("Plugin.DBInsert", query)
+}
+
+func (c *dbServicesClient) Update(ctx context.Context, query pluginsdk.Update) (pluginsdk.DBResult, error) {
+	return c.dbWrite("Plugin.DBUpdate", query)
+}
+
+func (c *dbServicesClient) Delete(ctx context.Context, query pluginsdk.Delete) (pluginsdk.DBResult, error) {
+	return c.dbWrite("Plugin.DBDelete", query)
+}
+
+func (c *dbServicesClient) dbWrite(method string, query any) (pluginsdk.DBResult, error) {
+	payload, err := json.Marshal(query)
+	if err != nil {
+		return pluginsdk.DBResult{}, err
+	}
+	var reply DBWriteReply
+	if err := c.client.Call(method, DBStatementRequest{QueryJSON: payload}, &reply); err != nil {
+		return pluginsdk.DBResult{}, err
+	}
+	return pluginsdk.DBResult{RowsAffected: reply.RowsAffected, LastInsertID: reply.LastInsertID}, nil
 }
 
 func (c *hostServicesClient) CallPluginService(_ context.Context, call pluginsdk.PluginServiceCall) (pluginsdk.PluginServiceResult, error) {
@@ -1332,24 +1357,15 @@ func logAttrs(attrs []any) []LogAttr {
 	return out
 }
 
-func encodeDBArgs(args []any) ([]byte, error) {
-	if len(args) == 0 {
-		return nil, nil
-	}
-	return json.Marshal(args)
-}
-
-func decodeDBArgs(data []byte) ([]any, error) {
+// decodeDBStatement 还原一条结构化语句。UseNumber 保住整数精度：绑定值经
+// JSON 往返后如果退化成 float64，写进 INTEGER 列的大整数会丢低位。
+func decodeDBStatement(data []byte, out any) error {
 	if len(data) == 0 {
-		return nil, nil
+		return fmt.Errorf("插件数据库语句为空")
 	}
-	var out []any
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	if err := decoder.Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return decoder.Decode(out)
 }
 
 func decodeDBRows(data []byte) ([]map[string]any, error) {

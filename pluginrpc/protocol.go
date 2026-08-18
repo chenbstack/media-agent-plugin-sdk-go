@@ -101,9 +101,37 @@ func packClientPluginSet(pluginIDs []string) (hcplugin.PluginSet, error) {
 	return set, nil
 }
 
+// PrintDBSchemaFlag 让打包脚本不启动插件协议就能取到私有表声明。
+//
+// 宿主要的是随包分发的 db.schema.json——它既是建表依据，也是查询编译器的白名单，
+// 必须来自包内容而不是插件进程自报。而声明的唯一事实源是 Go 代码里的
+// Plugin.Schema，手抄一份 JSON 放进仓库迟早会和代码漂移。带上这个参数运行插件
+// 二进制，它就把声明打到标准输出然后退出；没有声明时什么都不打印。
+const PrintDBSchemaFlag = "--print-db-schema"
+
+// printDBSchema 在命令行带 PrintDBSchemaFlag 时输出声明并报告「已经处理完毕」。
+func printDBSchema(impl pluginsdk.Plugin) bool {
+	if len(os.Args) < 2 || os.Args[1] != PrintDBSchemaFlag {
+		return false
+	}
+	if impl.Schema.IsZero() {
+		return true
+	}
+	data, err := json.MarshalIndent(impl.Schema, "", "  ")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println(string(data))
+	return true
+}
+
 // Serve exposes a pluginsdk.Plugin implementation as a HashiCorp go-plugin
 // net/rpc plugin. Third-party Go plugins call this from main().
 func Serve(impl pluginsdk.Plugin) {
+	if printDBSchema(impl) {
+		return
+	}
 	hcplugin.Serve(&hcplugin.ServeConfig{
 		HandshakeConfig: Handshake,
 		Plugins:         pluginSet(impl),
@@ -886,8 +914,11 @@ func withClient(ctx context.Context, cfg ClientConfig, fn func(*Client) error) e
 const OperationInstall = "plugin.install"
 
 type ExternalPlugin struct {
-	Manifest          pluginsdk.Manifest
-	ConfigSchema      pluginsdk.ConfigSchema
+	Manifest     pluginsdk.Manifest
+	ConfigSchema pluginsdk.ConfigSchema
+	// DBSchema 是插件私有表的声明，来自包目录里的 db.schema.json。宿主据此建表，
+	// 并把它当作查询编译器的白名单，所以它必须来自包内容而不是插件进程自报。
+	DBSchema          pluginsdk.DBSchema
 	IconSVG           []byte
 	Command           string
 	Args              []string
@@ -920,6 +951,7 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	out := pluginsdk.Plugin{
 		Manifest:     e.Manifest,
 		ConfigSchema: e.ConfigSchema,
+		Schema:       e.DBSchema,
 		IconSVG:      e.IconSVG,
 		ValidateConfig: func(config map[string]any) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

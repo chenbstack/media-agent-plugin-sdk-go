@@ -782,7 +782,7 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		}
 		services = &hostServicesClient{client: rpc.NewClient(conn)}
 		inst.KV = services
-		inst.DB = services
+		inst.DB = &dbServicesClient{client: services.client}
 		inst.Logger = services
 		inst.Runtime = &runtimesdk.Services{Feedback: &runtimeFeedbackClient{host: services}}
 		inst.SiteAccounts = services

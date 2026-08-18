@@ -80,17 +80,27 @@ func TestHostServicesRequirePrivateDBPermission(t *testing.T) {
 		db:  memoryDB{},
 	}
 
-	var reply StringReply
-	if err := server.DBTableName(DBTableNameRequest{LogicalName: "files"}, &reply); err == nil {
-		t.Fatal("expected DBTableName without data.storage permission to fail")
+	query, err := json.Marshal(pluginsdk.Select{From: pluginsdk.From("files")})
+	if err != nil {
+		t.Fatalf("marshal select: %v", err)
+	}
+	request := DBStatementRequest{QueryJSON: query}
+
+	var reply DBQueryReply
+	if err := server.DBSelect(request, &reply); err == nil {
+		t.Fatal("expected DBSelect without data.storage permission to fail")
 	}
 
 	server.permissions.Data = []string{"storage"}
-	if err := server.DBTableName(DBTableNameRequest{LogicalName: "files"}, &reply); err != nil {
-		t.Fatalf("DBTableName with data.storage permission: %v", err)
+	if err := server.DBSelect(request, &reply); err != nil {
+		t.Fatalf("DBSelect with data.storage permission: %v", err)
 	}
-	if reply.Value != "files" {
-		t.Fatalf("table name = %q", reply.Value)
+	rows, err := decodeDBRows(reply.RowsJSON)
+	if err != nil {
+		t.Fatalf("decode rows: %v", err)
+	}
+	if len(rows) != 1 || rows[0]["id"] != "row-1" {
+		t.Fatalf("rows = %v", rows)
 	}
 }
 
@@ -276,16 +286,20 @@ func (memoryKV) DeletePrefix(ctx context.Context, prefix string) error {
 
 type memoryDB struct{}
 
-func (memoryDB) TableName(logicalName string) (string, error) {
-	return logicalName, nil
+func (memoryDB) Select(context.Context, pluginsdk.Select) ([]map[string]any, error) {
+	return []map[string]any{{"id": "row-1"}}, nil
 }
 
-func (memoryDB) Exec(ctx context.Context, statement string, args ...any) (pluginsdk.DBResult, error) {
-	return pluginsdk.DBResult{}, nil
+func (memoryDB) Insert(context.Context, pluginsdk.Insert) (pluginsdk.DBResult, error) {
+	return pluginsdk.DBResult{RowsAffected: 1}, nil
 }
 
-func (memoryDB) Query(ctx context.Context, statement string, args ...any) ([]map[string]any, error) {
-	return nil, nil
+func (memoryDB) Update(context.Context, pluginsdk.Update) (pluginsdk.DBResult, error) {
+	return pluginsdk.DBResult{RowsAffected: 1}, nil
+}
+
+func (memoryDB) Delete(context.Context, pluginsdk.Delete) (pluginsdk.DBResult, error) {
+	return pluginsdk.DBResult{RowsAffected: 1}, nil
 }
 
 type staticSecretResolver string
