@@ -152,10 +152,12 @@ func isUnsupported(err error) bool {
 // Provider 方法。宿主新建连接表单要靠它决定「这个站点支持吗、要填哪些字段」。
 func TestSiteSupportForURLRoundTrip(t *testing.T) {
 	var gotURL string
+	var gotInstance string
 	client := newProviderTestClient(t, pluginsdk.Plugin{
 		Manifest: pluginsdk.Manifest{ID: "official-site", Name: "Site"},
-		SiteSupportForURL: func(_ context.Context, url string) (providers.SiteSupport, error) {
+		SiteSupportForURL: func(_ context.Context, inst pluginsdk.Instance, url string) (providers.SiteSupport, error) {
 			gotURL = url
+			gotInstance = inst.ID
 			return providers.SiteSupport{
 				Supported: true, ID: "demo", Name: "Demo",
 				AuthFields: []providers.AuthField{{Name: "cookie", Required: true, Secret: true}},
@@ -163,7 +165,7 @@ func TestSiteSupportForURLRoundTrip(t *testing.T) {
 		},
 	})
 
-	support, err := client.SiteSupportForURL(context.Background(), "https://demo.example/")
+	support, err := client.SiteSupportForURL(context.Background(), pluginsdk.Instance{ID: "global"}, "https://demo.example/")
 	if err != nil {
 		t.Fatalf("SiteSupportForURL: %v", err)
 	}
@@ -176,6 +178,11 @@ func TestSiteSupportForURLRoundTrip(t *testing.T) {
 	if field := support.AuthFields[0]; field.Name != "cookie" || !field.Required || !field.Secret {
 		t.Fatalf("认证字段声明未透传: %+v", field)
 	}
+	// 判定要读规则来源，所以这次调用必须带着实例过去（宿主服务挂在实例上）；
+	// 只传 URL 的话，跨进程的插件读不到规则目录，只能对所有地址回答「不支持」。
+	if gotInstance != "global" {
+		t.Fatalf("实例未透传: %q", gotInstance)
+	}
 }
 
 // 插件不做站点地址判定时必须是显式的不支持错误，不能是一个「什么都不支持」的空结果
@@ -184,7 +191,7 @@ func TestSiteSupportForURLUnsupported(t *testing.T) {
 	client := newProviderTestClient(t, pluginsdk.Plugin{
 		Manifest: pluginsdk.Manifest{ID: "other", Name: "Other"},
 	})
-	if _, err := client.SiteSupportForURL(context.Background(), "https://demo.example/"); !isUnsupported(err) {
+	if _, err := client.SiteSupportForURL(context.Background(), pluginsdk.Instance{ID: "global"}, "https://demo.example/"); !isUnsupported(err) {
 		t.Fatalf("err = %v, want ErrCapabilityUnsupported", err)
 	}
 }

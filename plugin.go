@@ -628,6 +628,15 @@ type Instance struct {
 	// 自己关心的文件；只在插件声明了 host 权限 "workspace.local" 时由宿主注入。
 	// 用户的媒体文件不在里面，也不该往里面放——那是 Sidecars / Mirrors 的事。
 	Workspace *Workspace
+	// Renderer 借宿主已启用的浏览器渲染插件取回页面，供站点插件绕过反爬挑战；
+	// 只在插件声明了 host 权限 "renderer.page" 时由宿主注入。
+	Renderer PageRenderer
+	// Cloud 以本实例身份访问云端，宿主只发短期令牌，实例长期密钥不出宿主进程；
+	// 只在插件声明了 host 权限 "cloud.identity" 时由宿主注入。
+	Cloud CloudIdentity
+	// SiteRules 只读访问宿主的站点规则目录（管理员自有规则）；
+	// 只在插件声明了 host 权限 "site.rules.read" 时由宿主注入。
+	SiteRules SiteRuleFiles
 	Runtime   *runtimesdk.Services
 }
 
@@ -751,7 +760,10 @@ type Plugin struct {
 	// SiteSupportForURL 判定一个站点地址是否被支持，以及需要哪些认证字段。
 	// 它发生在用户新建站点连接、还没有任何账号凭据的时刻，构造不出 SiteProvider，
 	// 所以是插件级查询。nil 表示插件不做站点地址判定。
-	SiteSupportForURL func(ctx context.Context, url string) (providers.SiteSupport, error)
+	//
+	// inst 是宿主传入的全局实例：判定要读规则来源，跨进程的插件因此需要一条能拿到
+	// 宿主服务（如站点规则目录）的通道，而 Instance 是这条通道唯一的载体。
+	SiteSupportForURL func(ctx context.Context, inst Instance, url string) (providers.SiteSupport, error)
 
 	// ConfigSchemaForConfig 根据当前配置返回有效 schema。用于字段集合需要依赖
 	// 其他字段或资源包的插件；nil 表示始终使用 ConfigSchema。

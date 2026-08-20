@@ -1059,12 +1059,12 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 	// 站点地址判定只在插件声明了对应 capability 时才暴露：字段留 nil 就是宿主的
 	// 能力检查，不需要宿主再去比对 manifest 一次。
 	if e.Manifest.HasExactCapability(providers.CapabilitySiteSupportResolve) {
-		out.SiteSupportForURL = func(ctx context.Context, url string) (providers.SiteSupport, error) {
+		out.SiteSupportForURL = func(ctx context.Context, inst pluginsdk.Instance, url string) (providers.SiteSupport, error) {
 			var support providers.SiteSupport
 			callCtx, cancel := contextWithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			err := e.withClientOperation(callCtx, "plugin.site.support", func(c *Client) error {
-				got, err := c.SiteSupportForURL(callCtx, url)
+				got, err := c.SiteSupportForURL(callCtx, inst, url)
 				if err != nil {
 					return err
 				}
@@ -1584,7 +1584,10 @@ type BytesReply struct {
 }
 
 // SiteSupportRequest 是站点地址支持性判定的调用参数。
-// 它不带 InstancePayload：判定发生在用户还没建立站点账号的时候。
+//
+// 它带 InstancePayload，但那不是站点账号：判定发生在用户还没建立任何站点账号的
+// 时候，这里传的是插件的全局实例，作用是把宿主服务通道递过去（规则目录、云端身份）。
 type SiteSupportRequest struct {
-	URL string
+	Instance InstancePayload
+	URL      string
 }

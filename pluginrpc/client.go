@@ -427,6 +427,19 @@ func isUnknownRPCMethod(err error) bool {
 // instancePayload 把实例打包成一次 RPC 的载荷。第二个返回值必须在这次调用结束后调用：
 // 它把 host-services 通道还回池里（没走池时是空操作）。开流、起常驻服务这类调用的通道
 // 要活到会话结束，release 就挂在会话的 Close 上，而不是发完 RPC 就还。
+// needsHostServices 判断这次调用要不要为插件开一条回调宿主的通道。
+//
+// 漏掉任何一项的后果都是同一种：插件那边字段为 nil，功能静默消失，宿主日志里什么
+// 都没有。所以判定集中在这里，并由测试逐项守着。
+func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) bool {
+	return secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil ||
+		inst.SiteAccounts != nil || inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil ||
+		inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil || inst.Storages != nil ||
+		inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
+		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil || inst.Renderer != nil ||
+		inst.Cloud != nil || inst.SiteRules != nil
+}
+
 func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (InstancePayload, func(), error) {
 	configJSON, err := encodeConfig(inst.Config)
 	if err != nil {
@@ -443,10 +456,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 	if features.ConfigDigest {
 		payload.ConfigJSON, payload.ConfigHash = c.configs.prepare(inst.ID, configJSON)
 	}
-	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil || inst.SiteAccounts != nil ||
-		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil ||
-		inst.Storages != nil || inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
-		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil {
+	if needsHostServices(inst, secrets) {
 		state := &hostServicesState{
 			ctx:                   ctx,
 			pluginID:              c.manifest.ID,
@@ -474,6 +484,9 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			sidecars:              inst.Sidecars,
 			mirrors:               inst.Mirrors,
 			playback:              inst.Playback,
+			renderer:              inst.Renderer,
+			cloud:                 inst.Cloud,
+			siteRules:             inst.SiteRules,
 		}
 		// 只对声明了复用的插件走池：老插件每次调用都会 Dial，而池化的通道已经被
 		// AcceptAndServe 消费掉了，它的第二次 Dial 会一直等不到人 accept。
@@ -999,9 +1012,14 @@ func (c pluginClientWriteCloser) Close() error {
 }
 
 // SiteSupportForURL 查询插件对某个站点地址的支持情况。
-func (c *Client) SiteSupportForURL(ctx context.Context, url string) (providers.SiteSupport, error) {
+func (c *Client) SiteSupportForURL(ctx context.Context, inst pluginsdk.Instance, url string) (providers.SiteSupport, error) {
+	payload, release, err := c.instancePayload(ctx, inst, nil)
+	if err != nil {
+		return providers.SiteSupport{}, err
+	}
+	defer release()
 	var reply JSONReply
-	if err := c.call(ctx, "Plugin.SiteSupportForURL", SiteSupportRequest{URL: url}, &reply); err != nil {
+	if err := c.call(ctx, "Plugin.SiteSupportForURL", SiteSupportRequest{Instance: payload, URL: url}, &reply); err != nil {
 		return providers.SiteSupport{}, err
 	}
 	var out providers.SiteSupport

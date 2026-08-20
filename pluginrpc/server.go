@@ -838,6 +838,9 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.Sidecars = services
 	inst.Mirrors = services
 	inst.Playback = services
+	inst.Renderer = services
+	inst.Cloud = services
+	inst.SiteRules = services
 	return inst, nil
 }
 
@@ -923,6 +926,11 @@ func (s *rpcServer) SiteSupportForURL(req SiteSupportRequest, reply *JSONReply) 
 	if s.plugin.SiteSupportForURL == nil {
 		return providers.UnsupportedCapabilityError("site.support.resolve")
 	}
-	value, callErr := s.plugin.SiteSupportForURL(context.Background(), req.URL)
+	inst, _, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	value, callErr := s.plugin.SiteSupportForURL(context.Background(), inst, req.URL)
 	return setJSONReply(reply, value, callErr)
 }

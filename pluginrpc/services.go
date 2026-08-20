@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go"
+	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 	runtimesdk "github.com/chenbstack/media-agent-plugin-sdk-go/runtime"
 )
 
@@ -49,6 +50,9 @@ type hostServicesState struct {
 	sidecars              pluginsdk.MediaSidecars
 	mirrors               pluginsdk.MediaMirrors
 	playback              pluginsdk.MediaPlayback
+	renderer              pluginsdk.PageRenderer
+	cloud                 pluginsdk.CloudIdentity
+	siteRules             pluginsdk.SiteRuleFiles
 }
 
 // hostServicesServer 是插件回调宿主的那一端。通道池会在每次租用前换掉 state，所以
@@ -669,6 +673,101 @@ func (s *hostServicesServer) ResolvePlaybackURL(req PlaybackResolveRequest, repl
 	return err
 }
 
+type RenderPageRequest struct {
+	Input providers.RenderRequest
+}
+
+type SiteRuleFileRequest struct {
+	Name string
+}
+
+// RendererAvailable 只报可用性，插件据此决定是否展示「浏览器仿真」开关。
+func (s *hostServicesServer) RendererAvailable(_ Empty, reply *JSONReply) error {
+	if s.live().renderer == nil {
+		return fmt.Errorf("宿主未提供 PageRenderer")
+	}
+	if err := s.requireHostPermission("renderer.page"); err != nil {
+		return err
+	}
+	out, err := encodeJSON(s.live().renderer.RendererAvailable(s.live().ctx))
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) RenderPage(req RenderPageRequest, reply *JSONReply) error {
+	if s.live().renderer == nil {
+		return fmt.Errorf("宿主未提供 PageRenderer")
+	}
+	if err := s.requireHostPermission("renderer.page"); err != nil {
+		return err
+	}
+	result, err := s.live().renderer.RenderPage(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+// CloudCredential 只发短期令牌。实例长期密钥不经过这条通道，插件也无从索取。
+func (s *hostServicesServer) CloudCredential(_ Empty, reply *JSONReply) error {
+	if s.live().cloud == nil {
+		return fmt.Errorf("宿主未提供 CloudIdentity")
+	}
+	if err := s.requireHostPermission("cloud.identity"); err != nil {
+		return err
+	}
+	result, err := s.live().cloud.CloudCredential(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) ListSiteRuleFiles(_ Empty, reply *JSONReply) error {
+	if s.live().siteRules == nil {
+		return fmt.Errorf("宿主未提供 SiteRuleFiles")
+	}
+	if err := s.requireHostPermission("site.rules.read"); err != nil {
+		return err
+	}
+	result, err := s.live().siteRules.ListSiteRuleFiles(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+// ReadSiteRuleFile 返回原始字节而不是 JSON：规则文件是 YAML，base64 化没有意义，
+// 而宿主对文件名的越界校验在实现侧做，不依赖插件自觉。
+func (s *hostServicesServer) ReadSiteRuleFile(req SiteRuleFileRequest, reply *BytesReply) error {
+	if s.live().siteRules == nil {
+		return fmt.Errorf("宿主未提供 SiteRuleFiles")
+	}
+	if err := s.requireHostPermission("site.rules.read"); err != nil {
+		return err
+	}
+	data, err := s.live().siteRules.ReadSiteRuleFile(s.live().ctx, req.Name)
+	if err != nil {
+		return err
+	}
+	reply.Data = data
+	return nil
+}
+
 // WriteMirror 和 WriteSubtitle 一样只收 FileRef 不收路径：目标存储由用户的插件配置
 // 决定，存储内的相对路径由宿主从 FileRef 推导，插件指不了目录也走不出去。
 func (s *hostServicesServer) WriteMirror(req MirrorWriteRequest, reply *JSONReply) error {
@@ -1135,6 +1234,53 @@ func (c *hostServicesClient) ResolvePlaybackURL(_ context.Context, input plugins
 	}
 	var result pluginsdk.PlaybackResolveResult
 	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) RendererAvailable(_ context.Context) bool {
+	var reply JSONReply
+	if err := c.call("Plugin.RendererAvailable", Empty{}, &reply); err != nil {
+		return false
+	}
+	var available bool
+	if err := decodeJSON(reply.Data, &available); err != nil {
+		return false
+	}
+	return available
+}
+
+func (c *hostServicesClient) RenderPage(_ context.Context, req providers.RenderRequest) (providers.RenderResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.RenderPage", RenderPageRequest{Input: req}, &reply); err != nil {
+		return providers.RenderResult{}, err
+	}
+	var result providers.RenderResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) CloudCredential(_ context.Context) (pluginsdk.CloudCredential, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.CloudCredential", Empty{}, &reply); err != nil {
+		return pluginsdk.CloudCredential{}, err
+	}
+	var result pluginsdk.CloudCredential
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ListSiteRuleFiles(_ context.Context) ([]string, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListSiteRuleFiles", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []string
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ReadSiteRuleFile(_ context.Context, name string) ([]byte, error) {
+	var reply BytesReply
+	if err := c.call("Plugin.ReadSiteRuleFile", SiteRuleFileRequest{Name: name}, &reply); err != nil {
+		return nil, err
+	}
+	return reply.Data, nil
 }
 
 func (c *hostServicesClient) ListSiteAccounts(_ context.Context) ([]pluginsdk.SiteAccountInfo, error) {
