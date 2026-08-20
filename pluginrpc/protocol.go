@@ -49,7 +49,7 @@ func (p *netRPCPlugin) Server(b *hcplugin.MuxBroker) (interface{}, error) {
 }
 
 func (p *netRPCPlugin) Client(b *hcplugin.MuxBroker, c *rpc.Client) (interface{}, error) {
-	return &Client{client: c, broker: b}, nil
+	return &Client{client: c, broker: b, hostChannels: newHostChannelPool()}, nil
 }
 
 func pluginSet(impl pluginsdk.Plugin) hcplugin.PluginSet {
@@ -180,6 +180,27 @@ type InstancePayload struct {
 	// 它。子进程与宿主在同一文件系统命名空间里，路径直接可用。
 	WorkspaceDir         string
 	HostServicesBrokerID uint32
+	// ConfigHash 是 ConfigJSON 的摘要。宿主判断配置与上次发给这个进程的相同时会把
+	// ConfigJSON 留空、只发摘要，插件按摘要取回上次收到的那份（见 configdigest.go）。
+	// 只对握手时声明了 ConfigDigest 的插件这么做。
+	ConfigHash string
+	// HostServicesPersistent 为真时，这条 host-services 通道是池子里的：插件用完不要
+	// 关连接，下一次调用还会用到它。为假（含老宿主根本不设这个字段）时行为照旧——
+	// 通道是这一次调用专用的，插件用完就该关。
+	HostServicesPersistent bool
+}
+
+// FeaturesReply 是插件侧 SDK 声明的协议能力。
+//
+// 它取决于插件**编译时链接的 SDK 版本**，不是插件作者的意图，所以不放进 manifest 而是
+// 运行时问一次。老插件没有 Plugin.Features 这个方法，net/rpc 会回 "can't find method"，
+// 宿主据此判定为旧版，全部按老路径走。
+type FeaturesReply struct {
+	// ConfigDigest 表示插件能按摘要复用上一次收到的配置。
+	ConfigDigest bool
+	// PersistentHostServices 表示插件能复用宿主的 host-services 通道，不必每次调用
+	// 重新 Dial。
+	PersistentHostServices bool
 }
 
 type ConfigRequest struct {
@@ -420,6 +441,9 @@ type ModelGenerateRequest struct {
 	Inputs           []providers.ModelInput
 	MaxTokens        int
 	IncludeReasoning bool
+	// ReplyMarker 见 providers.ModelGenerateRequest.ReplyMarker。gob 加字段两向
+	// 兼容：老插件收到多出来的字段会忽略，老宿主不发这个字段时插件读到空串。
+	ReplyMarker      string
 	Now              time.Time
 	HasNow           bool
 	ProgressBrokerID uint32
@@ -520,7 +544,10 @@ type ClientConfig struct {
 	ScopeID     string
 	Operation   string
 	// Env 是本次操作追加到子进程环境的额外变量（key=value）；空则仅继承宿主环境。
-	Env               []string
+	Env []string
+	// Detached 让子进程不绑定 ctx：常驻进程的生死由 ResidentPool 管，不能被某一次
+	// 调用的 ctx 带走。ctx 仍然限制这次握手的等待。
+	Detached          bool
 	ProcessObserver   ProcessObserver
 	ActivityObserver  PluginActivityObserver
 	PermissionChecker PermissionChecker
@@ -564,6 +591,15 @@ type Client struct {
 	permissionChecker PermissionChecker
 	activityObserver  PluginActivityObserver
 	packID            string
+
+	// configs 记住每个实例最近发过的配置，好在没变时只发摘要。
+	configs hostConfigCache
+	// hostChannels 复用插件回调宿主用的 broker 通道，见 hostchannel.go。
+	hostChannels *hostChannelPool
+	// featuresMu 保护下面两个字段：协议能力只探测一次，探测本身也是一趟 RPC。
+	featuresMu     sync.Mutex
+	featuresProbed bool
+	features       FeaturesReply
 }
 
 type PermissionChecker interface {
@@ -637,6 +673,45 @@ type runningClient struct {
 	process *hcplugin.Client
 	client  *Client
 	done    func()
+	// release 非空表示这是常驻池里的一个租约：Close 只是还回去，不结束进程。
+	release func()
+}
+
+// exited 报告子进程是否已经不在了（被外部杀掉、自己崩了）。
+func (c *runningClient) exited() bool {
+	return c == nil || c.process == nil || c.process.Exited()
+}
+
+func (c *runningClient) pid() int {
+	if c == nil || c.process == nil {
+		return 0
+	}
+	if reattach := c.process.ReattachConfig(); reattach != nil {
+		return reattach.Pid
+	}
+	return 0
+}
+
+// ping 走 go-plugin 自带的连接探活：进程还在但 RPC 已经卡死时，只看 exited 是看不出
+// 来的。ClientProtocol.Ping 本身不带超时，所以在外面套一层。
+func (c *runningClient) ping(timeout time.Duration) error {
+	if c == nil || c.process == nil {
+		return fmt.Errorf("插件进程为空")
+	}
+	protocol, err := c.process.Client()
+	if err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- protocol.Ping() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return fmt.Errorf("插件进程探活超时")
+	}
 }
 
 func startClient(ctx context.Context, cfg ClientConfig) (*runningClient, error) {
@@ -644,6 +719,9 @@ func startClient(ctx context.Context, cfg ClientConfig) (*runningClient, error) 
 		return nil, fmt.Errorf("插件入口为空")
 	}
 	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+	if cfg.Detached {
+		cmd = exec.Command(cfg.Command, cfg.Args...)
+	}
 	if cfg.Dir != "" {
 		cmd.Dir = cfg.Dir
 	}
@@ -891,6 +969,13 @@ func (c *runningClient) Close() {
 	if c == nil {
 		return
 	}
+	if c.release != nil {
+		// 常驻租约：还回池里，进程继续活着。
+		release := c.release
+		c.release = nil
+		release()
+		return
+	}
 	if c.done != nil {
 		c.done()
 		c.done = nil
@@ -913,6 +998,9 @@ func withClient(ctx context.Context, cfg ClientConfig, fn func(*Client) error) e
 // 注入下载代理等环境变量，避免影响渲染等其他操作的子进程。
 const OperationInstall = "plugin.install"
 
+// OperationUninstall 是卸载操作名，与安装一样按操作定制 stderr 与环境变量。
+const OperationUninstall = "plugin.uninstall"
+
 type ExternalPlugin struct {
 	Manifest     pluginsdk.Manifest
 	ConfigSchema pluginsdk.ConfigSchema
@@ -926,10 +1014,17 @@ type ExternalPlugin struct {
 	Stderr            io.Writer
 	PermissionChecker PermissionChecker
 	ProcessObserver   ProcessObserver
-	Credentials       *ProcessCredentials
+	// ActivityObserver 报告「这一刻这个进程在处理哪次调用」。逐次起进程时进程的
+	// 生死本身就是活动区间，可以不填；进程常驻之后 ProcessObserver 只说明「它还活着」，
+	// 想知道它在不在干活就只剩这一个来源。
+	ActivityObserver PluginActivityObserver
+	Credentials      *ProcessCredentials
 	// Env 按操作名返回追加到子进程环境的额外变量（key=value）。可为 nil。
 	// 宿主用它把全局网络代理等注入到特定操作（如 OperationInstall 的引擎下载）。
 	Env func(operation string) []string
+	// Resident 非空时插件进程跨调用存活，由这个池管理。进程能闲置多久由池的参数决定，
+	// 宿主据插件的 manifest 设置。为 nil 时行为与逐次起进程完全一致。
+	Resident *ResidentPool
 }
 
 // envFor 返回某操作要追加的环境变量；Env 未设置时为 nil。
@@ -1129,6 +1224,8 @@ type externalHTTPService struct {
 	secrets  pluginsdk.SecretResolver
 	name     string
 	running  *runningClient
+	// releaseHostServices 还回这次服务占用的 host-services 通道，服务停掉时才调。
+	releaseHostServices func()
 }
 
 func (s *externalHTTPService) Start(ctx context.Context, options pluginsdk.HTTPServiceOptions) (pluginsdk.HTTPServiceInfo, error) {
@@ -1141,24 +1238,27 @@ func (s *externalHTTPService) Start(ctx context.Context, options pluginsdk.HTTPS
 	if err != nil {
 		return pluginsdk.HTTPServiceInfo{}, err
 	}
-	info, err := running.client.HTTPServiceStartContext(ctx, s.inst, s.secrets, s.name, options)
+	info, release, err := running.client.HTTPServiceStartContext(ctx, s.inst, s.secrets, s.name, options)
 	if err != nil {
 		running.Close()
 		return pluginsdk.HTTPServiceInfo{}, err
 	}
-	s.running = running
+	s.running, s.releaseHostServices = running, release
 	return info, nil
 }
 
 func (s *externalHTTPService) Stop(ctx context.Context) error {
 	s.mu.Lock()
-	running := s.running
-	s.running = nil
+	running, release := s.running, s.releaseHostServices
+	s.running, s.releaseHostServices = nil, nil
 	s.mu.Unlock()
 	if running == nil {
 		return nil
 	}
 	err := running.client.HTTPServiceStopContext(ctx, s.name)
+	if release != nil {
+		release()
+	}
 	running.Close()
 	return err
 }
@@ -1238,7 +1338,7 @@ func (e ExternalPlugin) installForwarders(component string) pluginsdk.InstallCom
 			var result pluginsdk.UninstallResult
 			callCtx, cancel := contextWithTimeout(ctx, externalPluginInstallTimeout)
 			defer cancel()
-			err := e.withClientOperationStderr(callCtx, "plugin.uninstall", progress, func(c *Client) error {
+			err := e.withClientOperationStderr(callCtx, OperationUninstall, progress, func(c *Client) error {
 				got, err := c.UninstallContext(callCtx, component)
 				if err != nil {
 					return err
@@ -1252,7 +1352,7 @@ func (e ExternalPlugin) installForwarders(component string) pluginsdk.InstallCom
 			var result pluginsdk.UninstallResult
 			callCtx, cancel := contextWithTimeout(ctx, externalPluginInstallTimeout)
 			defer cancel()
-			err := e.withClientOperationStderr(callCtx, "plugin.uninstall", progress, func(c *Client) error {
+			err := e.withClientOperationStderr(callCtx, OperationUninstall, progress, func(c *Client) error {
 				got, err := c.UninstallWithInstanceContext(callCtx, component, inst, nil)
 				if err != nil {
 					return err
@@ -1291,33 +1391,17 @@ func (e ExternalPlugin) withClientOperationStderr(ctx context.Context, operation
 			stderr = extraStderr
 		}
 	}
-	return withClient(ctx, ClientConfig{
+	// 安装类操作要实时回显进度，stderr 是这一次专属的，因此永远不进常驻池。
+	return withClient(ctx, e.clientConfig("plugin", "global", operation, stderr), fn)
+}
+
+// clientConfig 是这个插件起一次子进程要用的全部参数。
+func (e ExternalPlugin) clientConfig(scopeType, scopeID, operation string, stderr io.Writer) ClientConfig {
+	return ClientConfig{
 		Command:           e.Command,
 		Args:              e.Args,
 		Dir:               e.Dir,
 		Stderr:            stderr,
-		Manifest:          e.Manifest,
-		Permissions:       e.Manifest.Permissions,
-		ScopeType:         "plugin",
-		ScopeID:           "global",
-		Operation:         operation,
-		Env:               e.envFor(operation),
-		ProcessObserver:   e.ProcessObserver,
-		PermissionChecker: e.PermissionChecker,
-		Credentials:       e.Credentials,
-	}, fn)
-}
-
-func (e ExternalPlugin) withClientForScope(ctx context.Context, scopeType, scopeID string, fn func(*Client) error) error {
-	return e.withClientForScopeOperation(ctx, scopeType, scopeID, "plugin.rpc", fn)
-}
-
-func (e ExternalPlugin) withClientForScopeOperation(ctx context.Context, scopeType, scopeID, operation string, fn func(*Client) error) error {
-	return withClient(ctx, ClientConfig{
-		Command:           e.Command,
-		Args:              e.Args,
-		Dir:               e.Dir,
-		Stderr:            e.Stderr,
 		Manifest:          e.Manifest,
 		Permissions:       e.Manifest.Permissions,
 		ScopeType:         scopeType,
@@ -1325,9 +1409,27 @@ func (e ExternalPlugin) withClientForScopeOperation(ctx context.Context, scopeTy
 		Operation:         operation,
 		Env:               e.envFor(operation),
 		ProcessObserver:   e.ProcessObserver,
+		ActivityObserver:  e.ActivityObserver,
 		PermissionChecker: e.PermissionChecker,
 		Credentials:       e.Credentials,
-	}, fn)
+	}
+}
+
+func (e ExternalPlugin) withClientForScope(ctx context.Context, scopeType, scopeID string, fn func(*Client) error) error {
+	return e.withClientForScopeOperation(ctx, scopeType, scopeID, "plugin.rpc", fn)
+}
+
+func (e ExternalPlugin) withClientForScopeOperation(ctx context.Context, scopeType, scopeID, operation string, fn func(*Client) error) error {
+	cfg := e.clientConfig(scopeType, scopeID, operation, e.Stderr)
+	client, release, pooled, err := e.Resident.acquire(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	if pooled {
+		defer release()
+		return fn(client)
+	}
+	return withClient(ctx, cfg, fn)
 }
 
 func (e ExternalPlugin) startClient(ctx context.Context) (*runningClient, error) {
@@ -1338,22 +1440,18 @@ func (e ExternalPlugin) startClientForScope(ctx context.Context, scopeType, scop
 	return e.startClientForScopeOperation(ctx, scopeType, scopeID, "plugin.rpc")
 }
 
+// startClientForScopeOperation 起一个由调用方持有的会话（文件流、常驻 HTTP 服务）。
+// 走常驻池时返回的是一个租约，Close 只把它还回池里。
 func (e ExternalPlugin) startClientForScopeOperation(ctx context.Context, scopeType, scopeID, operation string) (*runningClient, error) {
-	return startClient(ctx, ClientConfig{
-		Command:           e.Command,
-		Args:              e.Args,
-		Dir:               e.Dir,
-		Stderr:            e.Stderr,
-		Manifest:          e.Manifest,
-		Permissions:       e.Manifest.Permissions,
-		ScopeType:         scopeType,
-		ScopeID:           scopeID,
-		Operation:         operation,
-		Env:               e.envFor(operation),
-		ProcessObserver:   e.ProcessObserver,
-		PermissionChecker: e.PermissionChecker,
-		Credentials:       e.Credentials,
-	})
+	cfg := e.clientConfig(scopeType, scopeID, operation, e.Stderr)
+	client, release, pooled, err := e.Resident.acquire(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if pooled {
+		return &runningClient{client: client, release: release}, nil
+	}
+	return startClient(ctx, cfg)
 }
 
 // streamCopyBufferSize 是 broker 流转发的缓冲大小。SMB 等网络存储的读写

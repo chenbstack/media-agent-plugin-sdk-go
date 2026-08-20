@@ -403,7 +403,7 @@ func (s *rpcServer) ModelGenerate(req ModelGenerateRequest, reply *JSONReply) er
 	progress, closeProgress := s.modelProgress(req.ProgressBrokerID)
 	defer closeProgress()
 	value, callErr := p.Generate(context.Background(), providers.ModelGenerateRequest{
-		Model: req.Model, Prompt: req.Prompt, Inputs: req.Inputs, MaxTokens: req.MaxTokens, IncludeReasoning: req.IncludeReasoning, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
+		Model: req.Model, Prompt: req.Prompt, Inputs: req.Inputs, MaxTokens: req.MaxTokens, IncludeReasoning: req.IncludeReasoning, ReplyMarker: req.ReplyMarker, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
 	})
 	return setJSONReply(reply, value, callErr)
 }
@@ -495,123 +495,64 @@ func (s *rpcServer) downloader(payload InstancePayload) (providers.DownloaderPro
 	if s.plugin.NewDownloader == nil {
 		return nil, nil, fmt.Errorf("插件未实现 DownloaderProvider")
 	}
-	inst, secrets, closeFn, err := s.instance(payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := s.plugin.NewDownloader(context.Background(), inst, secrets)
-	if err != nil {
-		closeFn()
-		return nil, nil, err
-	}
-	return provider, closeFn, nil
+	return leaseProvider(s, "downloader", payload, s.plugin.NewDownloader)
 }
 
 func (s *rpcServer) mediaServer(payload InstancePayload) (providers.MediaServerProvider, func(), error) {
 	if s.plugin.NewMediaServer == nil {
 		return nil, nil, fmt.Errorf("插件未实现 MediaServerProvider")
 	}
-	inst, secrets, closeFn, err := s.instance(payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := s.plugin.NewMediaServer(context.Background(), inst, secrets)
-	if err != nil {
-		closeFn()
-		return nil, nil, err
-	}
-	return provider, closeFn, nil
+	return leaseProvider(s, "mediaServer", payload, s.plugin.NewMediaServer)
 }
 
 func (s *rpcServer) metadata(payload InstancePayload) (providers.MetadataProvider, func(), error) {
 	if s.plugin.NewMetadata == nil {
 		return nil, nil, fmt.Errorf("插件未实现 MetadataProvider")
 	}
-	inst, secrets, closeFn, err := s.instance(payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := s.plugin.NewMetadata(context.Background(), inst, secrets)
-	if err != nil {
-		closeFn()
-		return nil, nil, err
-	}
-	return provider, closeFn, nil
+	return leaseProvider(s, "metadata", payload, s.plugin.NewMetadata)
 }
 
 func (s *rpcServer) site(payload InstancePayload) (providers.SiteProvider, func(), error) {
 	if s.plugin.NewSite == nil {
 		return nil, nil, fmt.Errorf("插件未实现 SiteProvider")
 	}
-	inst, secrets, closeFn, err := s.instance(payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := s.plugin.NewSite(context.Background(), inst, secrets)
-	if err != nil {
-		closeFn()
-		return nil, nil, err
-	}
-	return provider, closeFn, nil
+	return leaseProvider(s, "site", payload, s.plugin.NewSite)
 }
 
 func (s *rpcServer) notifier(payload InstancePayload) (providers.NotifierProvider, func(), error) {
 	if s.plugin.NewNotifier == nil {
 		return nil, nil, fmt.Errorf("插件未实现 NotifierProvider")
 	}
-	inst, secrets, closeFn, err := s.instance(payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := s.plugin.NewNotifier(context.Background(), inst, secrets)
-	if err != nil {
-		closeFn()
-		return nil, nil, err
-	}
-	return provider, closeFn, nil
+	return leaseProvider(s, "notifier", payload, s.plugin.NewNotifier)
 }
 
 func (s *rpcServer) subtitleSource(payload InstancePayload) (providers.SubtitleSourceProvider, func(), error) {
 	if s.plugin.NewSubtitleSource == nil {
 		return nil, nil, fmt.Errorf("插件未实现 SubtitleSourceProvider")
 	}
-	inst, secrets, closeFn, err := s.instance(payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := s.plugin.NewSubtitleSource(context.Background(), inst, secrets)
-	if err != nil {
-		closeFn()
-		return nil, nil, err
-	}
-	return provider, closeFn, nil
+	return leaseProvider(s, "subtitleSource", payload, s.plugin.NewSubtitleSource)
 }
 
 func (s *rpcServer) model(payload InstancePayload) (providers.ModelProvider, func(), error) {
 	if s.plugin.NewModel == nil && s.plugin.NewModelWithInstance == nil {
 		return nil, nil, fmt.Errorf("插件未实现 ModelProvider")
 	}
-	closeFn := func() {}
-	var provider providers.ModelProvider
 	if s.plugin.NewModelWithInstance != nil {
-		inst, secrets, closeInstance, err := s.instance(payload)
+		provider, closeFn, err := leaseProvider(s, "model", payload, s.plugin.NewModelWithInstance)
 		if err != nil {
 			return nil, nil, err
 		}
-		closeFn = closeInstance
-		provider, err = s.plugin.NewModelWithInstance(context.Background(), inst, secrets)
-		if err != nil {
+		if provider == nil {
 			closeFn()
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("插件返回了空 ModelProvider")
 		}
-	} else {
-		provider = s.plugin.NewModel()
+		return provider, closeFn, nil
 	}
+	provider := s.plugin.NewModel()
 	if provider == nil {
-		closeFn()
 		return nil, nil, fmt.Errorf("插件返回了空 ModelProvider")
 	}
-	return provider, closeFn, nil
+	return provider, func() {}, nil
 }
 
 func restoreClock(now time.Time, ok bool) func() time.Time {

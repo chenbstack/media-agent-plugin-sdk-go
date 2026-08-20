@@ -281,10 +281,11 @@ func (p *downloaderProvider) hashJSONCall(ctx context.Context, operation, method
 
 func (p *downloaderProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
 	return p.session.withClient(ctx, operation, func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		return fn(c, instance)
 	})
 }
@@ -389,10 +390,11 @@ func (p *mediaServerProvider) json(ctx context.Context, operation, method string
 }
 func (p *mediaServerProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
 	return p.session.withClient(ctx, operation, func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		return fn(c, instance)
 	})
 }
@@ -451,10 +453,11 @@ func (p *metadataProvider) json(ctx context.Context, operation, method string, r
 }
 func (p *metadataProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
 	return p.session.withClient(ctx, operation, func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		return fn(c, instance)
 	})
 }
@@ -501,10 +504,11 @@ func (p *siteProvider) json(ctx context.Context, operation, method string, reque
 }
 func (p *siteProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
 	return p.session.withClient(ctx, operation, func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		return fn(c, instance)
 	})
 }
@@ -532,10 +536,11 @@ func (p *notifierProvider) Send(ctx context.Context, message providers.Notificat
 }
 func (p *notifierProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
 	return p.session.withClient(ctx, operation, func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		return fn(c, instance)
 	})
 }
@@ -579,10 +584,11 @@ func (p *subtitleSourceProvider) Download(ctx context.Context, result providers.
 }
 func (p *subtitleSourceProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
 	return p.session.withClient(ctx, operation, func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		return fn(c, instance)
 	})
 }
@@ -602,10 +608,11 @@ func (p *modelProvider) Kind() string {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_ = p.session.withClient(ctx, "model_provider.kind", func(c *Client) error {
-			instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+			instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 			if err != nil {
 				return err
 			}
+			defer release()
 			var reply StringReply
 			if err := c.call(ctx, "Plugin.ModelKind", instance, &reply); err != nil {
 				return err
@@ -624,10 +631,11 @@ func (p *modelProvider) ValidateModel(model providers.ModelConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	err := p.session.withClient(ctx, "model_provider.validate", func(c *Client) error {
-		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
 		if payloadErr != nil {
 			return payloadErr
 		}
+		defer release()
 		var reply Empty
 		return c.call(ctx, "Plugin.ModelValidate", ModelConfigRequest{Instance: instance, Model: model}, &reply)
 	})
@@ -637,11 +645,12 @@ func (p *modelProvider) ValidateModel(model providers.ModelConfig) error {
 func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGenerateRequest) (providers.ModelGenerateResult, error) {
 	var out providers.ModelGenerateResult
 	err := p.session.withClient(ctx, "model_provider.generate", func(c *Client) error {
-		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
 		if payloadErr != nil {
 			return payloadErr
 		}
-		wire := ModelGenerateRequest{Instance: instance, Model: request.Model, Prompt: request.Prompt, Inputs: request.Inputs, MaxTokens: request.MaxTokens, IncludeReasoning: request.IncludeReasoning}
+		defer release()
+		wire := ModelGenerateRequest{Instance: instance, Model: request.Model, Prompt: request.Prompt, Inputs: request.Inputs, MaxTokens: request.MaxTokens, IncludeReasoning: request.IncludeReasoning, ReplyMarker: request.ReplyMarker}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
 		if request.Progress != nil {
 			wire.ProgressBrokerID = serveModelProgressSink(c.broker, request.Progress)
@@ -658,10 +667,11 @@ func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGen
 func (p *modelProvider) InputCapabilities(ctx context.Context, model providers.ModelConfig) (providers.ModelInputCapabilities, error) {
 	var out ModelInputCapabilitiesResult
 	err := p.session.withClient(ctx, "model_provider.input_capabilities", func(c *Client) error {
-		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
 		if payloadErr != nil {
 			return payloadErr
 		}
+		defer release()
 		return c.call(ctx, "Plugin.ModelInputCapabilities", ModelConfigRequest{Instance: instance, Model: model}, &out)
 	})
 	return out.Capabilities, normalizeModelError(err)
@@ -670,10 +680,11 @@ func (p *modelProvider) InputCapabilities(ctx context.Context, model providers.M
 func (p *modelProvider) Download(ctx context.Context, request providers.ModelDownloadRequest) (providers.ModelDownloadResult, error) {
 	var out providers.ModelDownloadResult
 	err := p.session.withClient(ctx, "model_provider.download", func(c *Client) error {
-		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
 		if payloadErr != nil {
 			return payloadErr
 		}
+		defer release()
 		wire := ModelDownloadRequest{Instance: instance, Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
 		if request.Progress != nil {
@@ -691,10 +702,11 @@ func (p *modelProvider) Download(ctx context.Context, request providers.ModelDow
 func (p *modelProvider) Uninstall(ctx context.Context, request providers.ModelUninstallRequest) (providers.ModelUninstallResult, error) {
 	var out providers.ModelUninstallResult
 	err := p.session.withClient(ctx, "model_provider.uninstall", func(c *Client) error {
-		instance, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
 		if payloadErr != nil {
 			return payloadErr
 		}
+		defer release()
 		wire := ModelUninstallRequest{Instance: instance, Model: request.Model, TimeoutSeconds: request.TimeoutSeconds}
 		wire.Now, wire.HasNow = snapshotClock(request.Now)
 		var reply JSONReply
@@ -711,10 +723,11 @@ func (p *modelProvider) CommandDisplay(model providers.ModelConfig) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	_ = p.session.withClient(ctx, "model_provider.command_display", func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply StringReply
 		if err := c.call(ctx, "Plugin.ModelCommandDisplay", ModelConfigRequest{Instance: instance, Model: model}, &reply); err != nil {
 			return err

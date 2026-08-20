@@ -14,10 +14,10 @@ import (
 func TestDomainCapabilitiesRoundTripRPC(t *testing.T) {
 	resources := memoryResources{}
 	server := rpc.NewServer()
-	target := &hostServicesServer{
+	target := newHostServicesServer(&hostServicesState{
 		ctx: context.Background(), connections: resources, connectionCredentials: resources, storages: resources, schedules: resources, settings: resources,
 		permissions: pluginsdk.Permissions{Host: []string{"connections.read", "connections.write", "connections.credentials.read", "storages.read", "storages.write", "schedules.read", "schedules.write", "settings.read", "settings.write"}},
-	}
+	})
 	if err := server.RegisterName("Plugin", target); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,8 @@ func TestDomainCapabilitiesRoundTripRPC(t *testing.T) {
 	go server.ServeConn(serverConn)
 	rpcClient := rpc.NewClient(clientConn)
 	defer rpcClient.Close()
-	client := &hostServicesClient{client: rpcClient}
+	client := &hostServicesClient{}
+	client.bind(rpcClient)
 
 	connections, err := client.ListConnections(t.Context(), "downloaders")
 	if err != nil || len(connections) != 1 || connections[0].ID != "connection-1" {
@@ -58,27 +59,27 @@ func TestDomainCapabilitiesRoundTripRPC(t *testing.T) {
 }
 
 func TestHostServicesRequireKVPermission(t *testing.T) {
-	server := hostServicesServer{
+	server := *newHostServicesServer(&hostServicesState{
 		ctx: context.Background(),
 		kv:  memoryKV{},
-	}
+	})
 
 	var reply KVGetReply
 	if err := server.KVGet(KVGetRequest{Key: "token"}, &reply); err == nil {
 		t.Fatal("expected KVGet without data.storage permission to fail")
 	}
 
-	server.permissions.Data = []string{"storage"}
+	server.live().permissions.Data = []string{"storage"}
 	if err := server.KVGet(KVGetRequest{Key: "token"}, &reply); err != nil {
 		t.Fatalf("KVGet with data.storage permission: %v", err)
 	}
 }
 
 func TestHostServicesRequirePrivateDBPermission(t *testing.T) {
-	server := hostServicesServer{
+	server := *newHostServicesServer(&hostServicesState{
 		ctx: context.Background(),
 		db:  memoryDB{},
-	}
+	})
 
 	query, err := json.Marshal(pluginsdk.Select{From: pluginsdk.From("files")})
 	if err != nil {
@@ -91,7 +92,7 @@ func TestHostServicesRequirePrivateDBPermission(t *testing.T) {
 		t.Fatal("expected DBSelect without data.storage permission to fail")
 	}
 
-	server.permissions.Data = []string{"storage"}
+	server.live().permissions.Data = []string{"storage"}
 	if err := server.DBSelect(request, &reply); err != nil {
 		t.Fatalf("DBSelect with data.storage permission: %v", err)
 	}
@@ -104,18 +105,55 @@ func TestHostServicesRequirePrivateDBPermission(t *testing.T) {
 	}
 }
 
+// DBBatch 与逐条写走同一道权限，结果个数必须与语句个数对上——插件按下标取回执。
+func TestHostServicesDBBatch(t *testing.T) {
+	server := *newHostServicesServer(&hostServicesState{
+		ctx: context.Background(),
+		db:  memoryDB{},
+	})
+
+	payload, err := json.Marshal([]pluginsdk.Statement{
+		pluginsdk.InsertStmt(pluginsdk.Insert{
+			Table:   "files",
+			Columns: []string{"id"},
+			Rows:    [][]pluginsdk.Expr{{pluginsdk.Param("row-1")}},
+		}),
+		pluginsdk.DeleteStmt(pluginsdk.Delete{
+			Table: "files",
+			Where: pluginsdk.Eq(pluginsdk.Col("id"), pluginsdk.Param("row-2")),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal statements: %v", err)
+	}
+	request := DBStatementRequest{QueryJSON: payload}
+
+	var reply DBBatchReply
+	if err := server.DBBatch(request, &reply); err == nil {
+		t.Fatal("expected DBBatch without data.storage permission to fail")
+	}
+
+	server.live().permissions.Data = []string{"storage"}
+	if err := server.DBBatch(request, &reply); err != nil {
+		t.Fatalf("DBBatch with data.storage permission: %v", err)
+	}
+	if len(reply.Results) != 2 {
+		t.Fatalf("results = %#v", reply.Results)
+	}
+}
+
 func TestHostServicesRequireSecretPermission(t *testing.T) {
-	server := hostServicesServer{
+	server := *newHostServicesServer(&hostServicesState{
 		ctx:     context.Background(),
 		secrets: staticSecretResolver("secret-value"),
-	}
+	})
 
 	var reply StringReply
 	if err := server.Reveal(RevealRequest{Ref: "ref", Reason: "test"}, &reply); err == nil {
 		t.Fatal("expected Reveal without secret permission to fail")
 	}
 
-	server.permissions.Secrets = []string{"storage.cookie"}
+	server.live().permissions.Secrets = []string{"storage.cookie"}
 	if err := server.Reveal(RevealRequest{Ref: "ref", Reason: "test"}, &reply); err != nil {
 		t.Fatalf("Reveal delegates to injected resolver: %v", err)
 	}
@@ -126,7 +164,7 @@ func TestHostServicesRequireSecretPermission(t *testing.T) {
 
 func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 	resources := memoryResources{}
-	server := hostServicesServer{
+	server := *newHostServicesServer(&hostServicesState{
 		ctx:           context.Background(),
 		subscriptions: memorySubscriptions{},
 		downloads:     memoryDownloads{},
@@ -136,7 +174,7 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 		storages:      resources,
 		schedules:     resources,
 		settings:      resources,
-	}
+	})
 	var writeReply JSONReply
 	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &writeReply); err == nil {
 		t.Fatal("expected subscription write without host permission to fail")
@@ -144,7 +182,7 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 	if err := server.SetSetting(SettingSetRequest{}, &writeReply); err == nil {
 		t.Fatal("expected settings write without host permission to fail")
 	}
-	server.permissions.Host = []string{"subscriptions.write", "downloads.read", "downloads.write", "transfers.write", "rules.read", "rules.write", "connections.read", "connections.write", "storages.read", "storages.write", "schedules.read", "schedules.write", "settings.read", "settings.write"}
+	server.live().permissions.Host = []string{"subscriptions.write", "downloads.read", "downloads.write", "transfers.write", "rules.read", "rules.write", "connections.read", "connections.write", "storages.read", "storages.write", "schedules.read", "schedules.write", "settings.read", "settings.write"}
 	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &writeReply); err != nil {
 		t.Fatalf("UpsertSubscription with permission: %v", err)
 	}
@@ -188,11 +226,11 @@ func TestHostServicesRequireTypedDomainPermissions(t *testing.T) {
 }
 
 func TestHostServicesUseFormalSubscriptionPermission(t *testing.T) {
-	server := hostServicesServer{
+	server := *newHostServicesServer(&hostServicesState{
 		ctx:           context.Background(),
 		subscriptions: memorySubscriptions{},
 		permissions:   pluginsdk.Permissions{Host: []string{"subscriptions.create"}},
-	}
+	})
 
 	var reply JSONReply
 	if err := server.UpsertSubscription(SubscriptionUpsertRequest{}, &reply); err != nil {
@@ -201,26 +239,26 @@ func TestHostServicesUseFormalSubscriptionPermission(t *testing.T) {
 }
 
 func TestHostServicesRequireConnectionCredentialPermission(t *testing.T) {
-	server := hostServicesServer{ctx: context.Background(), connectionCredentials: memoryResources{}}
+	server := *newHostServicesServer(&hostServicesState{ctx: context.Background(), connectionCredentials: memoryResources{}})
 	var reply StringReply
 	request := ConnectionCredentialRequest{Section: "media_servers", ID: "connection-1", Field: "api_key", Reason: "test"}
 	if err := server.RevealConnectionCredential(request, &reply); err == nil {
 		t.Fatal("expected credential reveal without host permission to fail")
 	}
-	server.permissions.Host = []string{"connections.credentials.read"}
+	server.live().permissions.Host = []string{"connections.credentials.read"}
 	if err := server.RevealConnectionCredential(request, &reply); err != nil || reply.Value != "connection-secret" {
 		t.Fatalf("credential reveal = %q, %v", reply.Value, err)
 	}
 }
 
 func TestHostServicesRequirePlaybackResolvePermission(t *testing.T) {
-	server := hostServicesServer{ctx: context.Background(), playback: memoryPlayback{}}
+	server := *newHostServicesServer(&hostServicesState{ctx: context.Background(), playback: memoryPlayback{}})
 	var reply JSONReply
 	input := PlaybackResolveRequest{Input: pluginsdk.PlaybackResolveInput{StorageID: "storage-115", Path: "/movie.mkv"}}
 	if err := server.ResolvePlaybackURL(input, &reply); err == nil {
 		t.Fatal("expected playback resolve without host permission to fail")
 	}
-	server.permissions.Host = []string{"media.playback.resolve"}
+	server.live().permissions.Host = []string{"media.playback.resolve"}
 	if err := server.ResolvePlaybackURL(input, &reply); err != nil {
 		t.Fatalf("ResolvePlaybackURL with permission: %v", err)
 	}
@@ -232,11 +270,11 @@ func TestHostServicesRequirePlaybackResolvePermission(t *testing.T) {
 
 func TestHostServicesRPCAcceptsMatchingLegacyStructShape(t *testing.T) {
 	server := rpc.NewServer()
-	target := &hostServicesServer{
+	target := newHostServicesServer(&hostServicesState{
 		ctx:         context.Background(),
 		kv:          memoryKV{},
 		permissions: pluginsdk.Permissions{Data: []string{"storage"}},
-	}
+	})
 	if err := server.RegisterName("Plugin", target); err != nil {
 		t.Fatalf("RegisterName returned error: %v", err)
 	}
@@ -300,6 +338,14 @@ func (memoryDB) Update(context.Context, pluginsdk.Update) (pluginsdk.DBResult, e
 
 func (memoryDB) Delete(context.Context, pluginsdk.Delete) (pluginsdk.DBResult, error) {
 	return pluginsdk.DBResult{RowsAffected: 1}, nil
+}
+
+func (memoryDB) Batch(_ context.Context, statements []pluginsdk.Statement) ([]pluginsdk.DBResult, error) {
+	results := make([]pluginsdk.DBResult, len(statements))
+	for i := range results {
+		results[i] = pluginsdk.DBResult{RowsAffected: 1}
+	}
+	return results, nil
 }
 
 type staticSecretResolver string

@@ -16,7 +16,7 @@ func TestRPCServerRegistersPluginMethods(t *testing.T) {
 		"rpcServer": &rpcServer{
 			plugin: pluginsdk.Plugin{Manifest: pluginsdk.Manifest{ID: "test", Name: "Test"}},
 		},
-		"hostServicesServer": &hostServicesServer{},
+		"hostServicesServer": newHostServicesServer(&hostServicesState{}),
 		"uploadSourceServer": &uploadSourceServer{},
 	}
 	for name, target := range cases {
@@ -137,10 +137,11 @@ func TestHTTPServiceLifecycleRoundTrip(t *testing.T) {
 	defer client.client.Close()
 
 	options := pluginsdk.HTTPServiceOptions{ListenHost: "127.0.0.1", BasePath: "/api/v1/play/redirect"}
-	info, err := client.HTTPServiceStartContext(t.Context(), pluginsdk.Instance{ID: "global"}, nil, "playback", options)
+	info, releaseHostServices, err := client.HTTPServiceStartContext(t.Context(), pluginsdk.Instance{ID: "global"}, nil, "playback", options)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	t.Cleanup(releaseHostServices)
 	if info.BaseURL != "http://127.0.0.1:12345" || service.options != options {
 		t.Fatalf("info=%+v options=%+v", info, service.options)
 	}

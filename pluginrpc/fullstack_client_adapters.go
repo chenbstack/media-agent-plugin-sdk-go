@@ -31,10 +31,11 @@ var _ pluginsdk.APIProvider = (*apiProvider)(nil)
 func (p *apiProvider) HandleAPI(ctx context.Context, request pluginsdk.APIRequest) (pluginsdk.APIResponse, error) {
 	var response pluginsdk.APIResponse
 	err := p.session.withClient(ctx, "api.handle", func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.APIHandle", APIHandleRequest{Instance: instance, Request: request}, &reply); err != nil {
 			return err
@@ -56,10 +57,11 @@ var _ pluginsdk.IdentityRedirectProvider = (*identityProvider)(nil)
 func (p *identityProvider) VerifyIdentity(ctx context.Context, request pluginsdk.IdentityVerifyRequest) (pluginsdk.IdentityVerification, error) {
 	var verification pluginsdk.IdentityVerification
 	err := p.session.withClient(ctx, "identity.verify", func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.IdentityVerify", IdentityVerifyRequest{Instance: instance, Request: request}, &reply); err != nil {
 			return err
@@ -72,10 +74,11 @@ func (p *identityProvider) VerifyIdentity(ctx context.Context, request pluginsdk
 func (p *identityProvider) BeginIdentity(ctx context.Context, request pluginsdk.IdentityBeginRequest) (pluginsdk.IdentityChallenge, error) {
 	var challenge pluginsdk.IdentityChallenge
 	err := p.session.withClient(ctx, "identity.begin", func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.IdentityBegin", IdentityBeginRequest{Instance: instance, Request: request}, &reply); err != nil {
 			return err
@@ -88,10 +91,11 @@ func (p *identityProvider) BeginIdentity(ctx context.Context, request pluginsdk.
 func (p *identityProvider) CompleteIdentity(ctx context.Context, request pluginsdk.IdentityCompleteRequest) (pluginsdk.IdentityVerification, error) {
 	var verification pluginsdk.IdentityVerification
 	err := p.session.withClient(ctx, "identity.complete", func(c *Client) error {
-		instance, err := c.instancePayload(ctx, p.inst, p.secrets)
+		instance, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.IdentityComplete", IdentityCompleteRequest{Instance: instance, Request: request}, &reply); err != nil {
 			return err

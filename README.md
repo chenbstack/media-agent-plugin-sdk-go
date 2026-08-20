@@ -35,6 +35,34 @@ Published builds should depend on an immutable tag. For local development
 across repositories, use an uncommitted `go.work` file rather than committing a
 relative `replace` directive.
 
+## Provider lifecycle
+
+默认每次 RPC 都调一次 `Plugin.NewXxx` 现造一个 Provider，因此挂在 Provider 字段上的任何状态
+（进程内缓存、登录 token、连接池）都只在这一次调用里有效。补全一部 10 季的剧集是 11 次调用，
+就是 11 个 Provider。
+
+插件可以声明 `Plugin.ReuseProviders: true`，SDK 据此按 (Provider 种类, 实例 ID, 配置摘要,
+有无 host 通道) 池化 Provider。**插件侧只需要这一个字段，不需要实现任何方法**：
+
+```go
+pluginsdk.Plugin{ ReuseProviders: true, NewMetadata: ..., }
+```
+
+SDK 的保证：
+
+- **配置隔离**：配置摘要进池键，配置一改就换新实例，旧配置（含旧密钥引用）造出来的 Provider
+  不会漏给新配置。密钥的值被改而引用没变时摘要不变，另有 5 分钟 TTL 兜底。
+- **独占**：租出去的实例同一时刻只服务一次调用。
+- **句柄始终有效**：构造时拿到的 `Instance` 与 `SecretResolver` 终生可用——SDK 在每次调用前把
+  它们背后的 host-services 通道换成本次调用的。调用结束后句柄立即失效（返回明确错误），不会打到
+  另一次调用的通道上。
+
+因此声明复用之后：上游数据缓存、登录态、连接池**应该**放在 Provider 字段上；「这一次调用的
+参数」不能再放。插件自己起 goroutine 访问这些字段时仍需自行加锁——池只保证不被两个调用同时
+租走，不管插件内部的并发。
+
+没有声明的插件行为完全不变：每次现造，永不入池。
+
 ## Agent tools and skills
 
 Plugins can declare bounded business tools under `agent.tools` by referencing

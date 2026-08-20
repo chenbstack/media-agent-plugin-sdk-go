@@ -15,7 +15,12 @@ const (
 	rpcErrNotFoundPrefix   = "[maerr:not_found] "
 	rpcErrPermissionPrefix = "[maerr:permission] "
 	rpcErrExistsPrefix     = "[maerr:already_exists] "
+	rpcErrConfigMissPrefix = "[maerr:config_miss] "
 )
+
+// ErrConfigNotCached 是插件报「宿主只发了配置摘要，但我这里没有对应的那份」。宿主会
+// 丢掉自己的记录、带完整配置重试一次，插件方不需要处理它。
+var ErrConfigNotCached = errors.New("插件未缓存该配置摘要")
 
 func encodeRPCError(err error) error {
 	if err == nil {
@@ -52,6 +57,8 @@ func decodeRPCError(err error) error {
 		return &typedRPCError{msg: strings.TrimPrefix(msg, rpcErrPermissionPrefix), sentinel: os.ErrPermission}
 	case strings.HasPrefix(msg, rpcErrExistsPrefix):
 		return &typedRPCError{msg: strings.TrimPrefix(msg, rpcErrExistsPrefix), sentinel: os.ErrExist}
+	case strings.HasPrefix(msg, rpcErrConfigMissPrefix):
+		return &typedRPCError{msg: strings.TrimPrefix(msg, rpcErrConfigMissPrefix), sentinel: ErrConfigNotCached}
 	}
 	// 旧版插件没有前缀：按本地文件系统、go-smb2 与 Windows 的既有文案兜底识别"不存在"。
 	lower := strings.ToLower(msg)

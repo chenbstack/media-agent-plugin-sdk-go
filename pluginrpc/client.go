@@ -3,8 +3,11 @@ package pluginrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/chenbstack/media-agent-plugin-sdk-go"
@@ -40,10 +43,11 @@ func (c *Client) InstallContext(ctx context.Context, component string) (pluginsd
 }
 
 func (c *Client) InstallWithInstanceContext(ctx context.Context, component string, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.InstallResult, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return pluginsdk.InstallResult{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.Install", InstallRequest{Component: component, Instance: payload}, &reply); err != nil {
 		return pluginsdk.InstallResult{}, err
@@ -60,10 +64,11 @@ func (c *Client) CheckInstallContext(ctx context.Context, component string) (plu
 }
 
 func (c *Client) CheckInstallWithInstanceContext(ctx context.Context, component string, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.InstallResult, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return pluginsdk.InstallResult{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.CheckInstall", InstallRequest{Component: component, Instance: payload}, &reply); err != nil {
 		return pluginsdk.InstallResult{}, err
@@ -80,10 +85,11 @@ func (c *Client) UninstallContext(ctx context.Context, component string) (plugin
 }
 
 func (c *Client) UninstallWithInstanceContext(ctx context.Context, component string, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.UninstallResult, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return pluginsdk.UninstallResult{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.Uninstall", InstallRequest{Component: component, Instance: payload}, &reply); err != nil {
 		return pluginsdk.UninstallResult{}, err
@@ -109,10 +115,11 @@ func (c *Client) ValidateConfigContext(ctx context.Context, config map[string]an
 }
 
 func (c *Client) FieldOptions(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, field string) ([]pluginsdk.Option, error) {
-	payload, err := c.instancePayload(context.Background(), inst, secrets)
+	payload, release, err := c.instancePayload(context.Background(), inst, secrets)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(context.Background(), "Plugin.FieldOptions", FieldOptionsRequest{Instance: payload, Field: field}, &reply); err != nil {
 		return nil, err
@@ -129,10 +136,11 @@ func (c *Client) StartAuth(inst pluginsdk.Instance, flow string) (pluginsdk.Auth
 }
 
 func (c *Client) StartAuthContext(ctx context.Context, inst pluginsdk.Instance, flow string) (pluginsdk.AuthStartResult, error) {
-	payload, err := c.instancePayload(ctx, inst, nil)
+	payload, release, err := c.instancePayload(ctx, inst, nil)
 	if err != nil {
 		return pluginsdk.AuthStartResult{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.StartAuth", AuthStartRequest{Instance: payload, Flow: flow}, &reply); err != nil {
 		return pluginsdk.AuthStartResult{}, err
@@ -149,10 +157,11 @@ func (c *Client) CheckAuth(inst pluginsdk.Instance, flow, sessionID string) (plu
 }
 
 func (c *Client) CheckAuthContext(ctx context.Context, inst pluginsdk.Instance, flow, sessionID string) (pluginsdk.AuthCheckResult, error) {
-	payload, err := c.instancePayload(ctx, inst, nil)
+	payload, release, err := c.instancePayload(ctx, inst, nil)
 	if err != nil {
 		return pluginsdk.AuthCheckResult{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.CheckAuth", AuthCheckRequest{Instance: payload, Flow: flow, SessionID: sessionID}, &reply); err != nil {
 		return pluginsdk.AuthCheckResult{}, err
@@ -165,10 +174,11 @@ func (c *Client) CheckAuthContext(ctx context.Context, inst pluginsdk.Instance, 
 }
 
 func (c *Client) HandleEventContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, event pluginsdk.EventEnvelope) error {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return err
 	}
+	defer release()
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -178,10 +188,11 @@ func (c *Client) HandleEventContext(ctx context.Context, inst pluginsdk.Instance
 }
 
 func (c *Client) RunActionContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, actionID string, input map[string]any) (pluginsdk.ActionResult, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return pluginsdk.ActionResult{}, err
 	}
+	defer release()
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return pluginsdk.ActionResult{}, err
@@ -198,10 +209,11 @@ func (c *Client) RunActionContext(ctx context.Context, inst pluginsdk.Instance, 
 }
 
 func (c *Client) RunScheduledTaskContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, request pluginsdk.ScheduledTaskRequest) (pluginsdk.ScheduledTaskResult, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return pluginsdk.ScheduledTaskResult{}, err
 	}
+	defer release()
 	requestJSON, err := json.Marshal(request)
 	if err != nil {
 		return pluginsdk.ScheduledTaskResult{}, err
@@ -218,10 +230,11 @@ func (c *Client) RunScheduledTaskContext(ctx context.Context, inst pluginsdk.Ins
 }
 
 func (c *Client) AssessOnboardingContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (pluginsdk.OnboardingAssessment, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return pluginsdk.OnboardingAssessment{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.AssessOnboarding", payload, &reply); err != nil {
 		return pluginsdk.OnboardingAssessment{}, err
@@ -236,20 +249,25 @@ func (c *Client) AssessOnboardingContext(ctx context.Context, inst pluginsdk.Ins
 	return result, nil
 }
 
-func (c *Client) HTTPServiceStartContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, name string, options pluginsdk.HTTPServiceOptions) (pluginsdk.HTTPServiceInfo, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+// HTTPServiceStartContext 让插件起一个常驻 HTTP 服务。第二个返回值要留到服务停掉时
+// 再调：服务的每个请求都可能回调宿主，host-services 通道得一直活着，不能发完这一次
+// RPC 就还回池里。
+func (c *Client) HTTPServiceStartContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, name string, options pluginsdk.HTTPServiceOptions) (pluginsdk.HTTPServiceInfo, func(), error) {
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
-		return pluginsdk.HTTPServiceInfo{}, err
+		return pluginsdk.HTTPServiceInfo{}, func() {}, err
 	}
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.HTTPServiceStart", HTTPServiceStartRequest{Instance: payload, Name: name, Options: options}, &reply); err != nil {
-		return pluginsdk.HTTPServiceInfo{}, err
+		release()
+		return pluginsdk.HTTPServiceInfo{}, func() {}, err
 	}
 	var info pluginsdk.HTTPServiceInfo
 	if err := decodeJSON(reply.Data, &info); err != nil {
-		return pluginsdk.HTTPServiceInfo{}, err
+		release()
+		return pluginsdk.HTTPServiceInfo{}, func() {}, err
 	}
-	return info, nil
+	return info, release, nil
 }
 
 func (c *Client) HTTPServiceStopContext(ctx context.Context, name string) error {
@@ -258,19 +276,21 @@ func (c *Client) HTTPServiceStopContext(ctx context.Context, name string) error 
 }
 
 func (c *Client) CookieSourceTestContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) error {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return err
 	}
+	defer release()
 	var reply Empty
 	return c.call(ctx, "Plugin.CookieSourceTest", payload, &reply)
 }
 
 func (c *Client) CookieSourceSnapshotContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (providers.CookieSnapshot, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return providers.CookieSnapshot{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.CookieSourceSnapshot", payload, &reply); err != nil {
 		return providers.CookieSnapshot{}, err
@@ -283,19 +303,21 @@ func (c *Client) CookieSourceSnapshotContext(ctx context.Context, inst pluginsdk
 }
 
 func (c *Client) RendererTestContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) error {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return err
 	}
+	defer release()
 	var reply Empty
 	return c.call(ctx, "Plugin.RendererTest", payload, &reply)
 }
 
 func (c *Client) RendererRenderContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, req providers.RenderRequest) (providers.RenderResult, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
 		return providers.RenderResult{}, err
 	}
+	defer release()
 	var reply JSONReply
 	if err := c.call(ctx, "Plugin.RendererRender", RendererRenderRequest{Instance: payload, Request: req}, &reply); err != nil {
 		return providers.RenderResult{}, err
@@ -308,9 +330,6 @@ func (c *Client) RendererRenderContext(ctx context.Context, inst pluginsdk.Insta
 }
 
 func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply any) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	var activityDone func()
 	if c.activityObserver != nil {
 		activityDone = c.activityObserver.PluginActivityStarted(PluginActivityStartInfo{
@@ -326,6 +345,20 @@ func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply
 	if activityDone != nil {
 		defer activityDone()
 	}
+	err := c.invoke(ctx, serviceMethod, args, reply)
+	if err != nil && errors.Is(err, ErrConfigNotCached) {
+		// 插件那边把这份配置淘汰了（或换了进程）。带完整配置原样重试一次。
+		if full, ok := c.withFullConfig(args); ok {
+			err = c.invoke(ctx, serviceMethod, full, reply)
+		}
+	}
+	return err
+}
+
+func (c *Client) invoke(ctx context.Context, serviceMethod string, args any, reply any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	call := c.client.Go(serviceMethod, args, reply, nil)
 	select {
 	case done := <-call.Done:
@@ -335,10 +368,69 @@ func (c *Client) call(ctx context.Context, serviceMethod string, args any, reply
 	}
 }
 
-func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (InstancePayload, error) {
+// withFullConfig 把完整配置塞回请求，供配置摘要未命中后重试。
+//
+// 请求结构体有几十个，但携带实例的字段一律叫 Instance；按名字找一次，比给每个结构体
+// 补一遍接口方法便宜得多，而且这段只在未命中这条罕见路径上跑。
+func (c *Client) withFullConfig(args any) (any, bool) {
+	value := reflect.ValueOf(args)
+	if value.Kind() != reflect.Struct {
+		return nil, false
+	}
+	copied := reflect.New(value.Type()).Elem()
+	copied.Set(value)
+	field := copied.FieldByName("Instance")
+	if !field.IsValid() || field.Type() != reflect.TypeOf(InstancePayload{}) || !field.CanSet() {
+		return nil, false
+	}
+	payload, ok := field.Interface().(InstancePayload)
+	if !ok {
+		return nil, false
+	}
+	// forget 顺带丢掉本地记录：下一次调用会重新整份发一遍，两边由此重新对齐。
+	configJSON := c.configs.forget(payload.ID)
+	if configJSON == nil {
+		return nil, false
+	}
+	payload.ConfigJSON = configJSON
+	field.Set(reflect.ValueOf(payload))
+	return copied.Interface(), true
+}
+
+// featureSet 问一次插件支持哪些协议优化，结果记在 Client 上。
+//
+// 探测失败分两种：插件没有这个方法是终局答案（老 SDK 编译的插件），记下来不再问；
+// 连接或上下文出问题则不下结论，留给下次调用重探。
+func (c *Client) featureSet(ctx context.Context) FeaturesReply {
+	c.featuresMu.Lock()
+	defer c.featuresMu.Unlock()
+	if c.featuresProbed {
+		return c.features
+	}
+	var reply FeaturesReply
+	switch err := c.invoke(ctx, "Plugin.Features", Empty{}, &reply); {
+	case err == nil:
+		c.features, c.featuresProbed = reply, true
+	case isUnknownRPCMethod(err):
+		c.featuresProbed = true
+	}
+	return c.features
+}
+
+// isUnknownRPCMethod 认出 net/rpc 对未注册方法的回复。老插件的 SDK 里没有新方法，
+// 这是判定它是老版本的唯一信号。
+func isUnknownRPCMethod(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "can't find method") || strings.Contains(message, "can't find service")
+}
+
+// instancePayload 把实例打包成一次 RPC 的载荷。第二个返回值必须在这次调用结束后调用：
+// 它把 host-services 通道还回池里（没走池时是空操作）。开流、起常驻服务这类调用的通道
+// 要活到会话结束，release 就挂在会话的 Close 上，而不是发完 RPC 就还。
+func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (InstancePayload, func(), error) {
 	configJSON, err := encodeConfig(inst.Config)
 	if err != nil {
-		return InstancePayload{}, err
+		return InstancePayload{}, func() {}, err
 	}
 	payload := InstancePayload{
 		ID:           inst.ID,
@@ -346,13 +438,16 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 		ConfigJSON:   configJSON,
 		WorkspaceDir: inst.Workspace.Root(),
 	}
+	features := c.featureSet(ctx)
+	// 老插件收到空的 ConfigJSON 会当成空配置，所以只对声明了 ConfigDigest 的插件省这份传输。
+	if features.ConfigDigest {
+		payload.ConfigJSON, payload.ConfigHash = c.configs.prepare(inst.ID, configJSON)
+	}
 	if secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil || inst.SiteAccounts != nil ||
 		inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil || inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil ||
 		inst.Storages != nil || inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
 		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil {
-		id := c.broker.NextId()
-		payload.HostServicesBrokerID = id
-		go c.broker.AcceptAndServe(id, &hostServicesServer{
+		state := &hostServicesState{
 			ctx:                   ctx,
 			pluginID:              c.manifest.ID,
 			scopeType:             c.scopeType,
@@ -379,9 +474,19 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			sidecars:              inst.Sidecars,
 			mirrors:               inst.Mirrors,
 			playback:              inst.Playback,
-		})
+		}
+		// 只对声明了复用的插件走池：老插件每次调用都会 Dial，而池化的通道已经被
+		// AcceptAndServe 消费掉了，它的第二次 Dial 会一直等不到人 accept。
+		pool := c.hostChannels
+		if !features.PersistentHostServices {
+			pool = nil
+		}
+		id, persistent, release := pool.lease(c.broker, inst.ID, state)
+		payload.HostServicesBrokerID = id
+		payload.HostServicesPersistent = persistent
+		return payload, release, nil
 	}
-	return payload, nil
+	return payload, func() {}, nil
 }
 
 type storageProvider struct {
@@ -508,10 +613,11 @@ func (p *storageProvider) Kind() string {
 
 func (p *storageProvider) TestConnection(ctx context.Context) error {
 	return p.withClientOperation(ctx, "storage.test", func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply Empty
 		return c.call(ctx, "Plugin.StorageTest", payload, &reply)
 	})
@@ -520,10 +626,11 @@ func (p *storageProvider) TestConnection(ctx context.Context) error {
 func (p *storageProvider) Info(ctx context.Context) (providers.StorageInfo, error) {
 	var out providers.StorageInfo
 	err := p.withClientOperation(ctx, "storage.info", func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.StorageInfo", payload, &reply); err != nil {
 			return err
@@ -535,10 +642,11 @@ func (p *storageProvider) Info(ctx context.Context) (providers.StorageInfo, erro
 
 func (p *storageProvider) EnsureMounted(ctx context.Context) error {
 	return p.withClientOperation(ctx, "storage.ensure_mounted", func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply Empty
 		return c.call(ctx, "Plugin.StorageEnsureMounted", payload, &reply)
 	})
@@ -546,10 +654,11 @@ func (p *storageProvider) EnsureMounted(ctx context.Context) error {
 
 func (p *storageProvider) Unmount(ctx context.Context) error {
 	return p.withClientOperation(ctx, "storage.unmount", func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply Empty
 		return c.call(ctx, "Plugin.StorageUnmount", payload, &reply)
 	})
@@ -558,10 +667,11 @@ func (p *storageProvider) Unmount(ctx context.Context) error {
 func (p *storageProvider) Stat(ctx context.Context, name string) (providers.StorageFileInfo, error) {
 	var out providers.StorageFileInfo
 	err := p.withClientOperation(ctx, "storage.stat", func(c *Client) error {
-		req, err := c.pathRequest(ctx, p.inst, p.secrets, name)
+		req, release, err := c.pathRequest(ctx, p.inst, p.secrets, name)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.StorageStat", req, &reply); err != nil {
 			return err
@@ -574,10 +684,11 @@ func (p *storageProvider) Stat(ctx context.Context, name string) (providers.Stor
 func (p *storageProvider) ListDir(ctx context.Context, path string) ([]providers.StorageFileInfo, error) {
 	var out []providers.StorageFileInfo
 	err := p.withClientOperation(ctx, "storage.list_dir", func(c *Client) error {
-		req, err := c.pathRequest(ctx, p.inst, p.secrets, path)
+		req, release, err := c.pathRequest(ctx, p.inst, p.secrets, path)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.StorageListDir", req, &reply); err != nil {
 			return err
@@ -600,22 +711,25 @@ func (p *storageProvider) OpenReader(ctx context.Context, name string) (io.ReadC
 	if err != nil {
 		return nil, err
 	}
-	req, err := running.client.pathRequest(ctx, p.inst, p.secrets, name)
+	req, release, err := running.client.pathRequest(ctx, p.inst, p.secrets, name)
 	if err != nil {
 		running.Close()
 		return nil, err
 	}
+	// 流会活到调用方 Close 为止，插件也会在这期间回调宿主，所以 host-services 通道
+	// 不能发完这一次 RPC 就还回池里。
+	closeSession := func() { release(); running.Close() }
 	var reply BrokerReply
 	if err := running.client.call(ctx, "Plugin.StorageOpenReader", req, &reply); err != nil {
-		running.Close()
+		closeSession()
 		return nil, err
 	}
 	conn, err := running.client.broker.Dial(reply.ID)
 	if err != nil {
-		running.Close()
+		closeSession()
 		return nil, err
 	}
-	return pluginClientReadCloser{ReadCloser: closeReadConn{Conn: conn}, closeClient: running.Close}, nil
+	return pluginClientReadCloser{ReadCloser: closeReadConn{Conn: conn}, closeClient: closeSession}, nil
 }
 
 func (p *storageProvider) OpenWriter(ctx context.Context, name string) (io.WriteCloser, error) {
@@ -623,22 +737,25 @@ func (p *storageProvider) OpenWriter(ctx context.Context, name string) (io.Write
 	if err != nil {
 		return nil, err
 	}
-	req, err := running.client.pathRequest(ctx, p.inst, p.secrets, name)
+	req, release, err := running.client.pathRequest(ctx, p.inst, p.secrets, name)
 	if err != nil {
 		running.Close()
 		return nil, err
 	}
+	// 流会活到调用方 Close 为止，插件也会在这期间回调宿主，所以 host-services 通道
+	// 不能发完这一次 RPC 就还回池里。
+	closeSession := func() { release(); running.Close() }
 	var reply BrokerReply
 	if err := running.client.call(ctx, "Plugin.StorageOpenWriter", req, &reply); err != nil {
-		running.Close()
+		closeSession()
 		return nil, err
 	}
 	conn, err := running.client.broker.Dial(reply.ID)
 	if err != nil {
-		running.Close()
+		closeSession()
 		return nil, err
 	}
-	return pluginClientWriteCloser{WriteCloser: conn, closeClient: running.Close}, nil
+	return pluginClientWriteCloser{WriteCloser: conn, closeClient: closeSession}, nil
 }
 
 func (p *storageProvider) OpenRangeReader(ctx context.Context, name string, offset, length int64) (io.ReadCloser, error) {
@@ -646,23 +763,25 @@ func (p *storageProvider) OpenRangeReader(ctx context.Context, name string, offs
 	if err != nil {
 		return nil, err
 	}
-	payload, err := running.client.instancePayload(ctx, p.inst, p.secrets)
+	payload, release, err := running.client.instancePayload(ctx, p.inst, p.secrets)
 	if err != nil {
 		running.Close()
 		return nil, err
 	}
+	// 同 OpenReader：通道要活到流关掉。
+	closeSession := func() { release(); running.Close() }
 	var reply BrokerReply
 	req := StorageRangeRequest{Instance: payload, Path: name, Offset: offset, Length: length}
 	if err := running.client.client.Call("Plugin.StorageOpenRangeReader", req, &reply); err != nil {
-		running.Close()
+		closeSession()
 		return nil, decodeRPCError(err)
 	}
 	conn, err := running.client.broker.Dial(reply.ID)
 	if err != nil {
-		running.Close()
+		closeSession()
 		return nil, err
 	}
-	return pluginClientReadCloser{ReadCloser: closeReadConn{Conn: conn}, closeClient: running.Close}, nil
+	return pluginClientReadCloser{ReadCloser: closeReadConn{Conn: conn}, closeClient: closeSession}, nil
 }
 
 func (p *storageProvider) OpenRangeWriter(ctx context.Context, name string, offset int64) (io.WriteCloser, error) {
@@ -670,31 +789,34 @@ func (p *storageProvider) OpenRangeWriter(ctx context.Context, name string, offs
 	if err != nil {
 		return nil, err
 	}
-	payload, err := running.client.instancePayload(ctx, p.inst, p.secrets)
+	payload, release, err := running.client.instancePayload(ctx, p.inst, p.secrets)
 	if err != nil {
 		running.Close()
 		return nil, err
 	}
+	// 同 OpenReader：通道要活到流关掉。
+	closeSession := func() { release(); running.Close() }
 	var reply BrokerReply
 	req := StorageRangeRequest{Instance: payload, Path: name, Offset: offset}
 	if err := running.client.client.Call("Plugin.StorageOpenRangeWriter", req, &reply); err != nil {
-		running.Close()
+		closeSession()
 		return nil, decodeRPCError(err)
 	}
 	conn, err := running.client.broker.Dial(reply.ID)
 	if err != nil {
-		running.Close()
+		closeSession()
 		return nil, err
 	}
-	return pluginClientWriteCloser{WriteCloser: conn, closeClient: running.Close}, nil
+	return pluginClientWriteCloser{WriteCloser: conn, closeClient: closeSession}, nil
 }
 
 func (p *storageProvider) Truncate(ctx context.Context, name string, size int64) error {
 	return p.withClientOperation(ctx, "storage.truncate", func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply Empty
 		return c.call(ctx, "Plugin.StorageTruncate", StorageTruncateRequest{Instance: payload, Path: name, Size: size}, &reply)
 	})
@@ -709,14 +831,16 @@ func (p *storageProvider) CopyBetweenInstances(ctx context.Context, source provi
 		return providers.ErrCrossInstanceCopyUnsupported
 	}
 	return p.withClientOperation(ctx, "storage.copy_between_instances", func(c *Client) error {
-		sourcePayload, err := c.instancePayload(ctx, src.inst, src.secrets)
+		sourcePayload, releaseSourcePayload, err := c.instancePayload(ctx, src.inst, src.secrets)
 		if err != nil {
 			return err
 		}
-		targetPayload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		defer releaseSourcePayload()
+		targetPayload, releaseTargetPayload, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer releaseTargetPayload()
 		req := StorageCopyBetweenRequest{
 			Source:     sourcePayload,
 			Target:     targetPayload,
@@ -749,10 +873,11 @@ func (p *storageProvider) Copy(ctx context.Context, oldname, newname string) err
 
 func (p *storageProvider) Upload(ctx context.Context, name string, source providers.UploadSource) error {
 	return p.withClientOperation(ctx, "storage.upload", func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		sourceID := c.broker.NextId()
 		go c.broker.AcceptAndServe(sourceID, &uploadSourceServer{ctx: ctx, source: source, broker: c.broker})
 		var reply Empty
@@ -767,10 +892,11 @@ func (p *storageProvider) Upload(ctx context.Context, name string, source provid
 func (p *storageProvider) ResolvePlaybackURL(ctx context.Context, input providers.PlaybackURLInput) (providers.PlaybackURLResult, error) {
 	var out providers.PlaybackURLResult
 	err := p.withClientOperation(ctx, "storage.playback_url", func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply JSONReply
 		if err := c.call(ctx, "Plugin.StorageResolvePlaybackURL", StoragePlaybackURLRequest{
 			Instance: payload,
@@ -785,10 +911,11 @@ func (p *storageProvider) ResolvePlaybackURL(ctx context.Context, input provider
 
 func (p *storageProvider) callPath(ctx context.Context, operation, method, path string) error {
 	return p.withClientOperation(ctx, operation, func(c *Client) error {
-		req, err := c.pathRequest(ctx, p.inst, p.secrets, path)
+		req, release, err := c.pathRequest(ctx, p.inst, p.secrets, path)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply Empty
 		return c.call(ctx, method, req, &reply)
 	})
@@ -796,10 +923,11 @@ func (p *storageProvider) callPath(ctx context.Context, operation, method, path 
 
 func (p *storageProvider) callRename(ctx context.Context, operation, method, oldpath, newpath string) error {
 	return p.withClientOperation(ctx, operation, func(c *Client) error {
-		payload, err := c.instancePayload(ctx, p.inst, p.secrets)
+		payload, release, err := c.instancePayload(ctx, p.inst, p.secrets)
 		if err != nil {
 			return err
 		}
+		defer release()
 		var reply Empty
 		return c.call(ctx, method, StorageRenameRequest{Instance: payload, OldPath: oldpath, NewPath: newpath}, &reply)
 	})
@@ -834,12 +962,14 @@ func (p *storageProvider) scope() (string, string) {
 	return "storage", p.inst.ID
 }
 
-func (c *Client) pathRequest(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, path string) (StoragePathRequest, error) {
-	payload, err := c.instancePayload(ctx, inst, secrets)
+// pathRequest 组一个「实例 + 路径」的请求。release 与 instancePayload 同义：调用方
+// 发完这一次 RPC 就该调，开流的调用则要等流关掉再调。
+func (c *Client) pathRequest(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, path string) (StoragePathRequest, func(), error) {
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
-		return StoragePathRequest{}, err
+		return StoragePathRequest{}, func() {}, err
 	}
-	return StoragePathRequest{Instance: payload, Path: path}, nil
+	return StoragePathRequest{Instance: payload, Path: path}, release, nil
 }
 
 type pluginClientReadCloser struct {

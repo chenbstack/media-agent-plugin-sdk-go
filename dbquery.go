@@ -216,6 +216,24 @@ type Delete struct {
 	All   bool   `json:"all,omitempty"`
 }
 
+// Statement 是 PluginDB.Batch 里的一条写语句：Insert / Update / Delete 三选一，
+// 恰好置一个字段。Select 不进批量——它要返回行，和「一批写要么全成要么全不成」
+// 不是一回事。
+type Statement struct {
+	Insert *Insert `json:"insert,omitempty"`
+	Update *Update `json:"update,omitempty"`
+	Delete *Delete `json:"delete,omitempty"`
+}
+
+// InsertStmt 把一次写入包成批量语句。
+func InsertStmt(query Insert) Statement { return Statement{Insert: &query} }
+
+// UpdateStmt 把一次更新包成批量语句。
+func UpdateStmt(query Update) Statement { return Statement{Update: &query} }
+
+// DeleteStmt 把一次删除包成批量语句。
+func DeleteStmt(query Delete) Statement { return Statement{Delete: &query} }
+
 // ---- 构造器 ----
 //
 // 结构体可以直接写，但嵌套起来很啰嗦。下面这组构造器让常见写法保持一行，

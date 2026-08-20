@@ -19,10 +19,10 @@ func (r *recordingSidecars) WriteSubtitle(_ context.Context, input pluginsdk.Sub
 
 func TestWriteSubtitleRequiresHostPermission(t *testing.T) {
 	sidecars := &recordingSidecars{}
-	server := hostServicesServer{
+	server := newHostServicesServer(&hostServicesState{
 		ctx:      context.Background(),
 		sidecars: sidecars,
-	}
+	})
 	input := pluginsdk.SubtitleWrite{FileRef: "ref-1", Content: []byte("1\n"), Language: "zh", Ext: "srt"}
 
 	var reply JSONReply
@@ -30,7 +30,7 @@ func TestWriteSubtitleRequiresHostPermission(t *testing.T) {
 		t.Fatal("没有 media.sidecar.write 权限时不应放行落盘")
 	}
 
-	server.permissions.Host = []string{"media.sidecar.write"}
+	server.live().permissions.Host = []string{"media.sidecar.write"}
 	if err := server.WriteSubtitle(SubtitleWriteRequest{Input: input}, &reply); err != nil {
 		t.Fatalf("声明权限后应放行: %v", err)
 	}
@@ -49,8 +49,8 @@ func TestWriteSubtitleRequiresHostPermission(t *testing.T) {
 func TestWriteSubtitleFailsWithoutHostCapability(t *testing.T) {
 	// 宿主没注入这个能力时要明确报错，而不是静默当成写成功了——
 	// 插件据此决定要不要换个来源再试。
-	server := hostServicesServer{ctx: context.Background()}
-	server.permissions.Host = []string{"media.sidecar.write"}
+	server := newHostServicesServer(&hostServicesState{ctx: context.Background()})
+	server.live().permissions.Host = []string{"media.sidecar.write"}
 
 	var reply JSONReply
 	if err := server.WriteSubtitle(SubtitleWriteRequest{Input: pluginsdk.SubtitleWrite{FileRef: "ref-1"}}, &reply); err == nil {

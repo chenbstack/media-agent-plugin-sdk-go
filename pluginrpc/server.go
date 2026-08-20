@@ -22,6 +22,20 @@ type rpcServer struct {
 	broker       *hcplugin.MuxBroker
 	httpMu       sync.Mutex
 	httpServices map[string]runningHTTPService
+	// configs 存着宿主发过来的配置，让宿主在配置没变时只发摘要。
+	configs pluginConfigCache
+	// channels 缓存已建立的 host-services 连接，见 hostchannel.go 里对通道复用的说明。
+	channels pluginHostChannels
+	// providers 让声明了 Plugin.ReuseProviders 的插件的 Provider 跨调用复用，字段上
+	// 的缓存因此才真正生效。没声明的插件仍旧每次现造。
+	providers providerPool
+}
+
+// Features 告诉宿主这份 SDK 支持哪些协议优化。老插件没有这个方法，宿主收到
+// "can't find method" 就知道要走老路径。
+func (s *rpcServer) Features(args Empty, reply *FeaturesReply) error {
+	*reply = FeaturesReply{ConfigDigest: true, PersistentHostServices: true}
+	return nil
 }
 
 type runningHTTPService struct {
@@ -762,10 +776,38 @@ func (s *rpcServer) StorageResolvePlaybackURL(req StoragePlaybackURLRequest, rep
 	return nil
 }
 
+// instance 组装一次调用的实例句柄，并绑上这次调用的 host-services 连接。
+//
+// 没有 host-services 通道时返回的 SecretResolver 必须是**真正的 nil 接口**，不能是
+// 装着 nil 指针的接口值：插件里 `if secrets == nil` 那类守卫对 typed-nil 判定为
+// false，守卫形同虚设，随后的 Reveal 打在一个没有连接的门面上。
 func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, pluginsdk.SecretResolver, func(), error) {
-	config, err := decodeConfig(payload.ConfigJSON)
+	services := &hostServicesClient{}
+	inst, err := s.assembleInstance(payload, services)
 	if err != nil {
 		return pluginsdk.Instance{}, nil, nil, err
+	}
+	release, err := s.bindHostServices(payload, services)
+	if err != nil {
+		return pluginsdk.Instance{}, nil, nil, err
+	}
+	var secrets pluginsdk.SecretResolver
+	if payload.HostServicesBrokerID != 0 {
+		secrets = services
+	}
+	return inst, secrets, release, nil
+}
+
+// assembleInstance 组装实例句柄。全部宿主服务字段都指向同一个门面对象 services，本次
+// 调用的连接由 bindHostServices 绑上去——句柄与连接分开，Provider 才能跨调用留住句柄。
+func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServicesClient) (pluginsdk.Instance, error) {
+	configJSON, ok := s.configs.resolve(payload)
+	if !ok {
+		return pluginsdk.Instance{}, fmt.Errorf("%s实例 %s 的配置摘要 %s", rpcErrConfigMissPrefix, payload.ID, payload.ConfigHash)
+	}
+	config, err := decodeConfig(configJSON)
+	if err != nil {
+		return pluginsdk.Instance{}, err
 	}
 	inst := pluginsdk.Instance{
 		ID:        payload.ID,
@@ -774,38 +816,46 @@ func (s *rpcServer) instance(payload InstancePayload) (pluginsdk.Instance, plugi
 		Logger:    pluginsdk.NoopLogger(),
 		Workspace: pluginsdk.NewWorkspace(payload.WorkspaceDir),
 	}
-	var services *hostServicesClient
-	if payload.HostServicesBrokerID != 0 {
-		conn, err := s.broker.Dial(payload.HostServicesBrokerID)
-		if err != nil {
-			return pluginsdk.Instance{}, nil, nil, err
-		}
-		services = &hostServicesClient{client: rpc.NewClient(conn)}
-		inst.KV = services
-		inst.DB = &dbServicesClient{client: services.client}
-		inst.Logger = services
-		inst.Runtime = &runtimesdk.Services{Feedback: &runtimeFeedbackClient{host: services}}
-		inst.SiteAccounts = services
-		inst.Subscriptions = services
-		inst.Downloads = services
-		inst.Transfers = services
-		inst.Rules = services
-		inst.Connections = services
-		inst.ConnectionCredentials = services
-		inst.Storages = services
-		inst.Schedules = services
-		inst.Settings = services
-		inst.Entitlements = services
-		inst.PluginServices = services
-		inst.Sidecars = services
-		inst.Mirrors = services
-		inst.Playback = services
+	if payload.HostServicesBrokerID == 0 {
+		return inst, nil
 	}
-	closeFn := func() {}
-	if services != nil {
-		closeFn = func() { _ = services.Close() }
+	inst.KV = services
+	inst.DB = &dbServicesClient{host: services}
+	inst.Logger = services
+	inst.Runtime = &runtimesdk.Services{Feedback: &runtimeFeedbackClient{host: services}}
+	inst.SiteAccounts = services
+	inst.Subscriptions = services
+	inst.Downloads = services
+	inst.Transfers = services
+	inst.Rules = services
+	inst.Connections = services
+	inst.ConnectionCredentials = services
+	inst.Storages = services
+	inst.Schedules = services
+	inst.Settings = services
+	inst.Entitlements = services
+	inst.PluginServices = services
+	inst.Sidecars = services
+	inst.Mirrors = services
+	inst.Playback = services
+	return inst, nil
+}
+
+// bindHostServices 把这次调用的连接绑到门面上。返回的 release 先摘掉连接——跑飞的
+// goroutine 于是拿到一个明确的错误，而不是打在下一次调用的连接上——再把通道还回缓存。
+func (s *rpcServer) bindHostServices(payload InstancePayload, services *hostServicesClient) (func(), error) {
+	if payload.HostServicesBrokerID == 0 {
+		return func() {}, nil
 	}
-	return inst, services, closeFn, nil
+	conn, release, err := s.channels.dial(s.broker, payload)
+	if err != nil {
+		return nil, err
+	}
+	services.bind(conn)
+	return func() {
+		services.detach()
+		release()
+	}, nil
 }
 
 func (s *rpcServer) storage(payload InstancePayload) (providers.StorageProvider, func(), error) {
