@@ -1056,6 +1056,24 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 			})
 		},
 	}
+	// 站点地址判定只在插件声明了对应 capability 时才暴露：字段留 nil 就是宿主的
+	// 能力检查，不需要宿主再去比对 manifest 一次。
+	if e.Manifest.HasExactCapability(providers.CapabilitySiteSupportResolve) {
+		out.SiteSupportForURL = func(ctx context.Context, url string) (providers.SiteSupport, error) {
+			var support providers.SiteSupport
+			callCtx, cancel := contextWithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			err := e.withClientOperation(callCtx, "plugin.site.support", func(c *Client) error {
+				got, err := c.SiteSupportForURL(callCtx, url)
+				if err != nil {
+					return err
+				}
+				support = got
+				return nil
+			})
+			return support, err
+		}
+	}
 	out.FieldOptions = func(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, field string) ([]pluginsdk.Option, error) {
 		var options []pluginsdk.Option
 		err := e.withClientOperation(ctx, "plugin.field_options", func(c *Client) error {
@@ -1544,4 +1562,29 @@ type closeReadConn struct {
 
 func (c closeReadConn) Close() error {
 	return c.Conn.Close()
+}
+
+// SiteURLRequest 是站点可选能力里「针对某个 URL」的调用参数，
+// 用于种子下载、MediaInfo 读取、字幕列表与字幕下载。
+type SiteURLRequest struct {
+	Instance InstancePayload
+	URL      string
+}
+
+// SiteDiagnoseRequest 是站点规则诊断的调用参数。
+type SiteDiagnoseRequest struct {
+	Instance InstancePayload
+	Input    providers.DiagnosticInput
+}
+
+// BytesReply 承载原始字节（种子文件、字幕文件）。
+// 不复用 JSONReply 是因为 JSON 会把字节流编成 base64，白白膨胀三分之一。
+type BytesReply struct {
+	Data []byte
+}
+
+// SiteSupportRequest 是站点地址支持性判定的调用参数。
+// 它不带 InstancePayload：判定发生在用户还没建立站点账号的时候。
+type SiteSupportRequest struct {
+	URL string
 }

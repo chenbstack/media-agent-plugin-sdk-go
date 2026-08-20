@@ -918,3 +918,11 @@ func (s *rpcServer) fileStorage(payload InstancePayload) (providers.FileStorageP
 	}
 	return fileProvider, closeFn, nil
 }
+
+func (s *rpcServer) SiteSupportForURL(req SiteSupportRequest, reply *JSONReply) error {
+	if s.plugin.SiteSupportForURL == nil {
+		return providers.UnsupportedCapabilityError("site.support.resolve")
+	}
+	value, callErr := s.plugin.SiteSupportForURL(context.Background(), req.URL)
+	return setJSONReply(reply, value, callErr)
+}

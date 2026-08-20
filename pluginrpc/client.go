@@ -997,3 +997,16 @@ func (c pluginClientWriteCloser) Close() error {
 	}
 	return err
 }
+
+// SiteSupportForURL 查询插件对某个站点地址的支持情况。
+func (c *Client) SiteSupportForURL(ctx context.Context, url string) (providers.SiteSupport, error) {
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.SiteSupportForURL", SiteSupportRequest{URL: url}, &reply); err != nil {
+		return providers.SiteSupport{}, err
+	}
+	var out providers.SiteSupport
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return providers.SiteSupport{}, err
+	}
+	return out, nil
+}

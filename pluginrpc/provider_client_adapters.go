@@ -466,6 +466,12 @@ type siteProvider struct {
 	session providerSession
 	inst    pluginsdk.Instance
 	secrets pluginsdk.SecretResolver
+
+	// 可选能力集在插件实例的生命周期内固定，查一次即可；查询失败不缓存，
+	// 避免插件进程一次抖动就把能力永久记成「没有」。
+	capsMu     sync.Mutex
+	caps       providers.SiteCapabilities
+	capsLoaded bool
 }
 
 var _ providers.SiteProvider = (*siteProvider)(nil)
@@ -764,4 +770,90 @@ func normalizeModelError(err error) error {
 		}
 	}
 	return err
+}
+
+// ---- 站点 Provider 的可选能力（providers/site_capabilities.go）----
+//
+// 适配器无条件实现全部可选接口：Go 的方法集是静态的，没法按插件声明动态增删。
+// 能力有无一律以 SiteCapabilities 为准，宿主先问能力再调方法；插件确实不具备时
+// 调用会返回 providers.ErrCapabilityUnsupported，是显式错误而非静默的空结果。
+
+var (
+	_ providers.SiteCapabilityReporter   = (*siteProvider)(nil)
+	_ providers.TorrentFetcher           = (*siteProvider)(nil)
+	_ providers.TorrentMediaInfoProvider = (*siteProvider)(nil)
+	_ providers.SiteSubtitleProvider     = (*siteProvider)(nil)
+	_ providers.SiteDiagnoser            = (*siteProvider)(nil)
+)
+
+func (p *siteProvider) SiteCapabilities() providers.SiteCapabilities {
+	p.capsMu.Lock()
+	defer p.capsMu.Unlock()
+	if p.capsLoaded {
+		return p.caps
+	}
+	var out providers.SiteCapabilities
+	if err := p.json(context.Background(), "site.capabilities", "Plugin.SiteCapabilities", nil, &out); err != nil {
+		return providers.SiteCapabilities{}
+	}
+	p.caps, p.capsLoaded = out, true
+	return out
+}
+
+func (p *siteProvider) FetchTorrent(ctx context.Context, url string) ([]byte, error) {
+	return p.bytes(ctx, "site.torrent.fetch", "Plugin.SiteFetchTorrent", url)
+}
+
+func (p *siteProvider) TorrentMediaInfo(ctx context.Context, detailURL string) (providers.TorrentMediaInfo, error) {
+	var out providers.TorrentMediaInfo
+	err := p.json(ctx, "site.mediainfo.read", "Plugin.SiteTorrentMediaInfo", func(instance InstancePayload) any {
+		return SiteURLRequest{Instance: instance, URL: detailURL}
+	}, &out)
+	return out, err
+}
+
+func (p *siteProvider) SubtitleAttachments(ctx context.Context, detailURL string) ([]providers.SubtitleAttachment, error) {
+	var out []providers.SubtitleAttachment
+	err := p.json(ctx, "site.subtitles.read", "Plugin.SiteSubtitleAttachments", func(instance InstancePayload) any {
+		return SiteURLRequest{Instance: instance, URL: detailURL}
+	}, &out)
+	return out, err
+}
+
+func (p *siteProvider) DownloadSubtitle(ctx context.Context, downloadURL string) ([]byte, error) {
+	return p.bytes(ctx, "site.subtitles.read", "Plugin.SiteDownloadSubtitle", downloadURL)
+}
+
+// Diagnose 的签名不返回 error（诊断把失败写进报告里），跨进程调用失败只能就地
+// 转成一份 error 状态的报告，否则宿主拿到空报告分不清「站点没问题」和「没调通」。
+func (p *siteProvider) Diagnose(ctx context.Context, input providers.DiagnosticInput) providers.DiagnosticReport {
+	var out providers.DiagnosticReport
+	err := p.json(ctx, "site.diagnose", "Plugin.SiteDiagnose", func(instance InstancePayload) any {
+		return SiteDiagnoseRequest{Instance: instance, Input: input}
+	}, &out)
+	if err != nil {
+		return providers.DiagnosticReport{
+			Status:  providers.DiagnosticError,
+			Keyword: input.Keyword,
+			IMDBID:  input.IMDBID,
+			Checks: []providers.DiagnosticCheck{{
+				ID: "plugin_call", Name: "调用站点插件", Status: providers.DiagnosticError,
+				Message: err.Error(),
+			}},
+		}
+	}
+	return out
+}
+
+func (p *siteProvider) bytes(ctx context.Context, operation, method, url string) ([]byte, error) {
+	var data []byte
+	err := p.withPayload(ctx, operation, func(c *Client, instance InstancePayload) error {
+		var reply BytesReply
+		if err := c.call(ctx, method, SiteURLRequest{Instance: instance, URL: url}, &reply); err != nil {
+			return err
+		}
+		data = reply.Data
+		return nil
+	})
+	return data, err
 }

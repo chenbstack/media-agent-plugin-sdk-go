@@ -561,3 +561,95 @@ func restoreClock(now time.Time, ok bool) func() time.Time {
 	}
 	return func() time.Time { return now }
 }
+
+// ---- 站点 Provider 的可选能力（providers/site_capabilities.go）----
+//
+// 插件侧的 SiteProvider 是否具备这些能力，由类型断言在插件进程内判定后经
+// SiteCapabilities 汇报给宿主。宿主不再自己对跨进程适配器做断言——那种断言在
+// RPC 之后必定失败，且失败分支都是静默降级。
+
+func (s *rpcServer) SiteCapabilities(req InstancePayload, reply *JSONReply) error {
+	p, closeFn, err := s.site(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return setJSONReply(reply, providers.CapabilitiesOfSite(p), nil)
+}
+
+func (s *rpcServer) SiteFetchTorrent(req SiteURLRequest, reply *BytesReply) error {
+	p, closeFn, err := s.site(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	fetcher, ok := p.(providers.TorrentFetcher)
+	if !ok {
+		return providers.UnsupportedCapabilityError(providers.CapabilitySiteTorrentFetch)
+	}
+	data, err := fetcher.FetchTorrent(context.Background(), req.URL)
+	if err != nil {
+		return err
+	}
+	reply.Data = data
+	return nil
+}
+
+func (s *rpcServer) SiteTorrentMediaInfo(req SiteURLRequest, reply *JSONReply) error {
+	p, closeFn, err := s.site(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	provider, ok := p.(providers.TorrentMediaInfoProvider)
+	if !ok {
+		return providers.UnsupportedCapabilityError(providers.CapabilitySiteMediaInfoRead)
+	}
+	value, callErr := provider.TorrentMediaInfo(context.Background(), req.URL)
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) SiteSubtitleAttachments(req SiteURLRequest, reply *JSONReply) error {
+	p, closeFn, err := s.site(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	provider, ok := p.(providers.SiteSubtitleProvider)
+	if !ok {
+		return providers.UnsupportedCapabilityError(providers.CapabilitySiteSubtitlesRead)
+	}
+	value, callErr := provider.SubtitleAttachments(context.Background(), req.URL)
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) SiteDownloadSubtitle(req SiteURLRequest, reply *BytesReply) error {
+	p, closeFn, err := s.site(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	provider, ok := p.(providers.SiteSubtitleProvider)
+	if !ok {
+		return providers.UnsupportedCapabilityError(providers.CapabilitySiteSubtitlesRead)
+	}
+	data, err := provider.DownloadSubtitle(context.Background(), req.URL)
+	if err != nil {
+		return err
+	}
+	reply.Data = data
+	return nil
+}
+
+func (s *rpcServer) SiteDiagnose(req SiteDiagnoseRequest, reply *JSONReply) error {
+	p, closeFn, err := s.site(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	diagnoser, ok := p.(providers.SiteDiagnoser)
+	if !ok {
+		return providers.UnsupportedCapabilityError(providers.CapabilitySiteDiagnose)
+	}
+	return setJSONReply(reply, diagnoser.Diagnose(context.Background(), req.Input), nil)
+}

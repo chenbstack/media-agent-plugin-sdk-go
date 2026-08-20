@@ -748,6 +748,11 @@ type Plugin struct {
 	// 做二次校验；例如站点插件按 base_url 匹配资源包后校验认证字段。
 	ValidateConfig func(config map[string]any) error
 
+	// SiteSupportForURL 判定一个站点地址是否被支持，以及需要哪些认证字段。
+	// 它发生在用户新建站点连接、还没有任何账号凭据的时刻，构造不出 SiteProvider，
+	// 所以是插件级查询。nil 表示插件不做站点地址判定。
+	SiteSupportForURL func(ctx context.Context, url string) (providers.SiteSupport, error)
+
 	// ConfigSchemaForConfig 根据当前配置返回有效 schema。用于字段集合需要依赖
 	// 其他字段或资源包的插件；nil 表示始终使用 ConfigSchema。
 	ConfigSchemaForConfig func(config map[string]any) ConfigSchema
