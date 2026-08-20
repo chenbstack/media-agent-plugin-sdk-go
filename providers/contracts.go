@@ -15,8 +15,12 @@ type StorageInfo struct {
 	Kind         string
 	RootPath     string
 	Capabilities []string
-	UsedBytes    int64 `json:"used_bytes,omitempty"`
-	TotalBytes   int64 `json:"total_bytes,omitempty"`
+	// UsedBytes / TotalBytes 是存储容量。TotalBytes 为 0 表示**容量未知**，不是
+	// 「容量为 0」：宿主据此保留上一次读到的容量，也不把这个存储算进总量统计。
+	// 查不到容量（服务器不支持、接口报错）时保持 0 并照常返回其余字段——容量拿不到
+	// 不影响存储可用。
+	UsedBytes  int64 `json:"used_bytes,omitempty"`
+	TotalBytes int64 `json:"total_bytes,omitempty"`
 	// CopyStreams 是这个存储实例愿意承受的并行复制流数上限，0 表示不表态、
 	// 由宿主决定。段数是插件才知道的事：同一份代码接家用 NAS 和接机房阵列，
 	// 能吃下的并发差一个量级，而宿主只看得到「两边都支持区间读写」。
@@ -426,7 +430,15 @@ type MetaDetail struct {
 	Aliases        []MetaAlias
 	Cast           []MetaCastMember
 	Seasons        []MetaSeason // 仅剧集
-	Raw            []byte       // 数据源原始响应，落 media.raw_json 兜底
+	// Score 是数据源给出的用户评分，统一折算到 0-10。0 表示这个数据源没有评分，
+	// 不是「评分为 0」。
+	//
+	// 有这个字段之前，宿主只能去 Raw 里按 vote_average / score / rating.value 猜，
+	// 于是 Bangumi 的 rating.score 永远猜不中（评分恒为空），而 TheTVDB 顶层那个
+	// 量级几万的 score（其实是热度）一旦被猜中就会写成一个荒谬的评分。评分是契约
+	// 的一部分，该由插件明说，不该让宿主去认每家数据源的字段名。
+	Score float64
+	Raw   []byte // 数据源原始响应，落 media.raw_json 兜底
 }
 
 type MetaCastMember struct {
@@ -503,6 +515,12 @@ type ModelGenerateRequest struct {
 	IncludeReasoning bool
 	Now              func() time.Time
 	Progress         ModelProgressFunc
+	// ReplyMarker 是回复正文的起始标记，供把整个会话回显到 stdout 的本地运行器
+	// （llama-cli 这类）定位真正的回复：命中时取最后一次出现处之后的内容。
+	//
+	// 由请求方给出，而不是让插件去猜宿主 prompt 模板长什么样——猜的那份字面量跨
+	// 仓库复制，宿主改协议时插件不会报错，只会静默裁错位置。留空表示不按标记裁剪。
+	ReplyMarker string
 }
 
 // ModelInput is bounded user-supplied context for one generation request.

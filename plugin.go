@@ -248,7 +248,12 @@ type UICard struct {
 	Data                 *UICardData `yaml:"data,omitempty" json:"data,omitempty"`
 	RequiredEntitlements []string    `yaml:"required_entitlements,omitempty" json:"required_entitlements,omitempty"`
 	RequiredPermissions  []string    `yaml:"required_permissions,omitempty" json:"required_permissions,omitempty"`
-	ForbiddenPermissions []string    `yaml:"forbidden_permissions,omitempty" json:"forbidden_permissions,omitempty"`
+	// RequiredAnyPermissions 命中其一即可，与 RequiredPermissions（必须全部命中）
+	// 是并列条件，两者都声明时要同时满足。卡片背后的接口常常接受几个权限中的任意
+	// 一个（「管站点的」或「管系统设置的」都能看站点统计），只有 all 语义时卡片和
+	// 接口的门对不齐：填得全了一部分有权限的人看不到卡，填一个又漏掉另一批人。
+	RequiredAnyPermissions []string `yaml:"required_any_permissions,omitempty" json:"required_any_permissions,omitempty"`
+	ForbiddenPermissions   []string `yaml:"forbidden_permissions,omitempty" json:"forbidden_permissions,omitempty"`
 }
 
 // UICardData 把卡片取数的活交给宿主：宿主按 RefreshInterval 周期性调用 Sources
@@ -691,6 +696,22 @@ type Plugin struct {
 	// 插件不需要自己建表或写迁移。声明同时是查询编译器的白名单：只有这里出现过的
 	// 表和列，插件的查询才引用得到。零值表示插件不使用私有库。
 	Schema DBSchema
+
+	// ReuseProviders 声明本插件的 Provider 可以跨调用复用。
+	//
+	// 默认（false）每次 RPC 都 NewXxx 现造一个，Provider 字段上的任何缓存都只在这一次
+	// 调用里有效：TVDB 补全一部 10 季的剧集会把同一份全量集列表分页拉 10 遍，而它一个
+	// 月有效的登录 token 同样存在 Provider 上，于是每次调用都先跑一趟 /login。
+	//
+	// 打开后 SDK 按 (实例, 配置摘要) 池化 Provider。配置一变摘要就变，池子自动换新，
+	// 旧配置（含旧密钥引用）造出来的实例不会漏给新配置；租出去的实例同一时刻只服务
+	// 一次调用。构造时拿到的 inst 与 secrets 句柄**始终有效**——SDK 会在每次调用前把
+	// 它们背后的通道换成本次调用的，插件侧不需要写任何代码配合。
+	//
+	// 唯一要想清楚的是：Provider 字段上的状态从此跨调用存活。上游数据缓存、登录态、
+	// 连接池正是要保住的东西；「这一次调用的参数」之类则不能再往字段上放。插件如果
+	// 自己在内部起 goroutine，这些字段仍需自行加锁——这一点与不复用时相同。
+	ReuseProviders bool
 
 	// 工厂按能力可选实现；nil 表示插件不提供该类 Provider。
 	NewStorage      func(ctx context.Context, inst Instance, secrets SecretResolver) (providers.StorageProvider, error)
@@ -1394,6 +1415,9 @@ func (m Manifest) validateExtensions(capabilities map[string]struct{}) error {
 			if err := validateIdentityKeys(m.ID, "ui card "+card.ID+" required_permissions", card.RequiredPermissions); err != nil {
 				return err
 			}
+			if err := validateIdentityKeys(m.ID, "ui card "+card.ID+" required_any_permissions", card.RequiredAnyPermissions); err != nil {
+				return err
+			}
 			if err := validateIdentityKeys(m.ID, "ui card "+card.ID+" forbidden_permissions", card.ForbiddenPermissions); err != nil {
 				return err
 			}
@@ -1555,7 +1579,13 @@ func (p Plugin) HasCapability(domain string) bool {
 
 // HasExactCapability 判断插件是否声明了某个完整 capability。
 func (p Plugin) HasExactCapability(capability string) bool {
-	for _, c := range p.Manifest.Capabilities {
+	return p.Manifest.HasExactCapability(capability)
+}
+
+// HasExactCapability 判断 manifest 是否声明了某个完整 capability。宿主在只拿到
+// manifest（还没构造 Plugin）的地方用它，比如加载插件包时决定要不要给它建常驻池。
+func (m Manifest) HasExactCapability(capability string) bool {
+	for _, c := range m.Capabilities {
 		if c == capability {
 			return true
 		}
