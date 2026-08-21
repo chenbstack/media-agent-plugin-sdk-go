@@ -114,6 +114,44 @@ func (c *Client) ValidateConfigContext(ctx context.Context, config map[string]an
 	return c.call(ctx, "Plugin.ValidateConfig", ConfigRequest{ConfigJSON: configJSON}, &reply)
 }
 
+// ValidateConfigWithInstanceContext 带上插件的全局实例做配置校验：跨进程的插件靠它
+// 拿到宿主服务（站点插件要读站点规则才知道该站点要哪些认证字段）。
+func (c *Client) ValidateConfigWithInstanceContext(ctx context.Context, inst pluginsdk.Instance, config map[string]any) error {
+	configJSON, err := encodeConfig(config)
+	if err != nil {
+		return err
+	}
+	payload, release, err := c.instancePayload(ctx, inst, nil)
+	if err != nil {
+		return err
+	}
+	defer release()
+	var reply Empty
+	return c.call(ctx, "Plugin.ValidateConfig", ConfigRequest{Instance: payload, ConfigJSON: configJSON}, &reply)
+}
+
+// ConfigSchemaForInstanceContext 解析插件在给定配置下的有效 schema。
+func (c *Client) ConfigSchemaForInstanceContext(ctx context.Context, inst pluginsdk.Instance, config map[string]any) (pluginsdk.ConfigSchema, error) {
+	configJSON, err := encodeConfig(config)
+	if err != nil {
+		return pluginsdk.ConfigSchema{}, err
+	}
+	payload, release, err := c.instancePayload(ctx, inst, nil)
+	if err != nil {
+		return pluginsdk.ConfigSchema{}, err
+	}
+	defer release()
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.ConfigSchemaForInstance", ConfigRequest{Instance: payload, ConfigJSON: configJSON}, &reply); err != nil {
+		return pluginsdk.ConfigSchema{}, err
+	}
+	var out pluginsdk.ConfigSchema
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return pluginsdk.ConfigSchema{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) FieldOptions(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, field string) ([]pluginsdk.Option, error) {
 	payload, release, err := c.instancePayload(context.Background(), inst, secrets)
 	if err != nil {

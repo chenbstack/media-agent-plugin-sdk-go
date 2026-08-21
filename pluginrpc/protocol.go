@@ -203,7 +203,13 @@ type FeaturesReply struct {
 	PersistentHostServices bool
 }
 
+// ConfigRequest 是配置校验与动态 schema 解析的调用参数。
+//
+// Instance 带的不是被校验的那个连接，而是插件的全局实例：这两次调用发生在连接还不
+// 存在的时刻，实例的唯一作用是把宿主服务通道递过去（站点规则目录、云端身份）。
+// 老宿主不填它，插件侧按空实例处理，等同于拿不到任何宿主服务。
 type ConfigRequest struct {
+	Instance             InstancePayload
 	ConfigJSON           []byte
 	HostServicesBrokerID uint32
 }
@@ -1025,6 +1031,29 @@ type ExternalPlugin struct {
 	// Resident 非空时插件进程跨调用存活，由这个池管理。进程能闲置多久由池的参数决定，
 	// 宿主据插件的 manifest 设置。为 nil 时行为与逐次起进程完全一致。
 	Resident *ResidentPool
+	// HostInstance 返回插件的全局实例，由宿主注入。
+	//
+	// 配置校验与动态 schema 这两个钩子发生在任何连接实例存在之前（用户还在填新建
+	// 表单），调用方手上没有实例可传；但跨进程的插件要靠实例才拿得到宿主服务，站点
+	// 插件正是在这两处读站点规则来判定认证字段。为 nil 时按空实例调用。
+	HostInstance func(ctx context.Context) pluginsdk.Instance
+}
+
+// hostInstance 取宿主注入的全局实例；没注入时是空实例。
+func (e ExternalPlugin) hostInstance(ctx context.Context) pluginsdk.Instance {
+	if e.HostInstance == nil {
+		return pluginsdk.Instance{}
+	}
+	return e.HostInstance(ctx)
+}
+
+// logf 把宿主侧的告警写进插件的 stderr 通道。宿主把那条流的每一行当作该插件的日志
+// 逐行转发，这是 ExternalPlugin 在同步返回值之外唯一的出声渠道。
+func (e ExternalPlugin) logf(format string, args ...any) {
+	if e.Stderr == nil {
+		return
+	}
+	fmt.Fprintf(e.Stderr, format+"\n", args...)
 }
 
 // envFor 返回某操作要追加的环境变量；Env 未设置时为 nil。
@@ -1051,10 +1080,36 @@ func (e ExternalPlugin) Plugin() pluginsdk.Plugin {
 		ValidateConfig: func(config map[string]any) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
+			inst := e.hostInstance(ctx)
 			return e.withClientOperation(ctx, "plugin.validate_config", func(c *Client) error {
-				return c.ValidateConfigContext(ctx, config)
+				return c.ValidateConfigWithInstanceContext(ctx, inst, config)
 			})
 		},
+	}
+	// 动态 schema 每解析一次就是一次 RPC，而宿主在每次构造 Provider 前都要拿 schema
+	// 枚举 secret 字段。只有声明了 capability 的插件才挂这个钩子，其余插件一次也不发。
+	if e.Manifest.HasExactCapability(pluginsdk.CapabilityDynamicConfigSchema) {
+		out.ConfigSchemaForConfig = func(config map[string]any) pluginsdk.ConfigSchema {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			inst := e.hostInstance(ctx)
+			var schema pluginsdk.ConfigSchema
+			err := e.withClientOperation(ctx, "plugin.config_schema", func(c *Client) error {
+				got, err := c.ConfigSchemaForInstanceContext(ctx, inst, config)
+				if err != nil {
+					return err
+				}
+				schema = got
+				return nil
+			})
+			if err != nil {
+				// 没有错误通道可用（调用点只要一个 schema），只能记下来再退回静态声明。
+				// 退回意味着动态字段全部消失，所以这条必须是错误级别、带插件 id。
+				e.logf("解析插件 %s 的动态配置 schema 失败，退回静态声明: %v", e.Manifest.ID, err)
+				return e.ConfigSchema
+			}
+			return schema
+		}
 	}
 	// 站点地址判定只在插件声明了对应 capability 时才暴露：字段留 nil 就是宿主的
 	// 能力检查，不需要宿主再去比对 manifest 一次。

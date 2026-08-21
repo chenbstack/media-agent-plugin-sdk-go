@@ -212,6 +212,14 @@ const (
 	CapabilityIdentityProvider = "identity.provider"
 )
 
+// CapabilityDynamicConfigSchema 声明「本插件的有效配置 schema 取决于当前配置」，
+// 由 Plugin.ConfigSchemaForConfig / ConfigSchemaForInstance 实现。
+//
+// 它是给宿主看的：解析动态 schema 对跨进程插件是一次 RPC，而宿主在每次构造 Provider
+// 前都要拿 schema 枚举 secret 字段。没有这条声明，宿主直接用静态 ConfigSchema，
+// 一次 RPC 也不发。
+const CapabilityDynamicConfigSchema = "config.schema.dynamic"
+
 // UIExtension 声明随已验签制品分发的前端模块及其页面。Module 必须是制品内的
 // 相对路径，不能是远程 URL；宿主仍需根据签名和发布策略决定是否允许同源加载。
 type UIExtension struct {
@@ -757,6 +765,15 @@ type Plugin struct {
 	// 做二次校验；例如站点插件按 base_url 匹配资源包后校验认证字段。
 	ValidateConfig func(config map[string]any) error
 
+	// ValidateConfigWithInstance 与 ValidateConfig 语义相同，但带宿主分配的全局
+	// Instance。宿主优先调用它，插件二选一实现即可。
+	//
+	// inst 是**插件的全局实例**，不是被校验的那个连接：校验发生在连接还不存在的时刻
+	// （用户正在填新建表单），它的作用只是把宿主服务通道递进来。站点插件正是靠它读
+	// 站点规则，据此判定该站点要哪些认证字段——同进程时那份规则来源是包级全局变量，
+	// 迁出宿主进程后只剩这一条通道。
+	ValidateConfigWithInstance func(ctx context.Context, inst Instance, config map[string]any) error
+
 	// SiteSupportForURL 判定一个站点地址是否被支持，以及需要哪些认证字段。
 	// 它发生在用户新建站点连接、还没有任何账号凭据的时刻，构造不出 SiteProvider，
 	// 所以是插件级查询。nil 表示插件不做站点地址判定。
@@ -767,7 +784,19 @@ type Plugin struct {
 
 	// ConfigSchemaForConfig 根据当前配置返回有效 schema。用于字段集合需要依赖
 	// 其他字段或资源包的插件；nil 表示始终使用 ConfigSchema。
+	//
+	// 实现了它（或下面的 ConfigSchemaForInstance）的插件必须在 manifest 里声明
+	// CapabilityDynamicConfigSchema，否则跨进程运行时宿主只会用静态 ConfigSchema。
 	ConfigSchemaForConfig func(config map[string]any) ConfigSchema
+
+	// ConfigSchemaForInstance 与 ConfigSchemaForConfig 语义相同，但带宿主分配的全局
+	// Instance，并且可以返回错误。宿主优先调用它，插件二选一实现即可。
+	//
+	// inst 的含义同 ValidateConfigWithInstance。取 schema 的调用点（如枚举 secret
+	// 字段）没有错误通道，宿主只能记下错误再退回静态 ConfigSchema——而静态 schema
+	// 意味着动态字段全部消失、用户填好的认证字段被判为「未声明」。所以这里只在真的
+	// 取不到时返回错误，不要拿它表达「这份配置不合法」（那是 ValidateConfig 的事）。
+	ConfigSchemaForInstance func(ctx context.Context, inst Instance, config map[string]any) (ConfigSchema, error)
 
 	// Install 是插件自举安装钩子（capability lifecycle.install）。用于插件下载运行所需
 	// 的外部资源（如浏览器引擎二进制）。宿主只负责触发、记录状态并向用户展示进度，不

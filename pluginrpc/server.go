@@ -149,14 +149,46 @@ func (s *rpcServer) Uninstall(req InstallRequest, reply *JSONReply) error {
 }
 
 func (s *rpcServer) ValidateConfig(req ConfigRequest, reply *Empty) error {
-	if s.plugin.ValidateConfig == nil {
+	if s.plugin.ValidateConfig == nil && s.plugin.ValidateConfigWithInstance == nil {
 		return nil
 	}
 	config, err := decodeConfig(req.ConfigJSON)
 	if err != nil {
 		return err
 	}
-	return s.plugin.ValidateConfig(config)
+	if s.plugin.ValidateConfigWithInstance == nil {
+		return s.plugin.ValidateConfig(config)
+	}
+	// 只有实现了带实例的钩子才组装实例：其余插件不必为一次校验开一条宿主服务通道。
+	inst, _, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return s.plugin.ValidateConfigWithInstance(context.Background(), inst, config)
+}
+
+// ConfigSchemaForInstance 解析插件在给定配置下的有效 schema。宿主只对声明了
+// CapabilityDynamicConfigSchema 的插件调用它；插件两个钩子都没实现时返回静态声明，
+// 这样宿主拿到的东西始终是一份可用的 schema。
+func (s *rpcServer) ConfigSchemaForInstance(req ConfigRequest, reply *JSONReply) error {
+	config, err := decodeConfig(req.ConfigJSON)
+	if err != nil {
+		return err
+	}
+	if s.plugin.ConfigSchemaForInstance == nil {
+		if s.plugin.ConfigSchemaForConfig == nil {
+			return setJSONReply(reply, s.plugin.ConfigSchema, nil)
+		}
+		return setJSONReply(reply, s.plugin.ConfigSchemaForConfig(config), nil)
+	}
+	inst, _, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	schema, callErr := s.plugin.ConfigSchemaForInstance(context.Background(), inst, config)
+	return setJSONReply(reply, schema, callErr)
 }
 
 func (s *rpcServer) FieldOptions(req FieldOptionsRequest, reply *JSONReply) error {
