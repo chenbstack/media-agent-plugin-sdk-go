@@ -6,9 +6,12 @@ import (
 	"github.com/chenbstack/media-agent-plugin-sdk-go/providers"
 )
 
-// 本文件是站点插件迁出宿主进程后需要的三项宿主服务。它们原先都是宿主进程内的直接
+// 本文件是站点插件迁出宿主进程后需要的宿主服务。前三项原先都是宿主进程内的直接
 // 调用：渲染网关是注入的 Go 对象，cloud 凭据是共享的 *http.Client，规则目录是一个
 // 全局字符串变量。跨进程之后这些都传不过去，只能成为显式的宿主服务契约。
+//
+// 后两项（SiteRulePackFiles / SiteRulePackKeys）服务于加密站点规则包：宿主负责取
+// 回并校验密文、派生实例绑定密钥，解密始终闭合在插件进程内。
 
 // PageRenderer 让插件借宿主已启用的浏览器渲染插件取回页面。
 //
@@ -57,4 +60,35 @@ type SiteRuleFiles interface {
 	// ReadSiteRuleFile 读取其中一个文件。name 必须是 ListSiteRuleFiles 返回过的
 	// 纯文件名，宿主会拒绝任何带路径分隔符或 .. 的名字。
 	ReadSiteRuleFile(ctx context.Context, name string) ([]byte, error)
+}
+
+// SiteRulePackFiles 只读访问宿主缓存的加密站点规则包（data/site-rules-cache）。
+//
+// 包里是密文。宿主下载、校验制品摘要与 Ed25519 签名、按版本落盘，但**不解密**：
+// 主程序是开源的，把解密放进来等于连密钥带规则一起公开，攻击者改一行重新编译即可
+// dump 全部规则。解密与解析必须闭合在插件进程内。
+//
+// 需要 host 权限 "site.rules.pack.read"。
+type SiteRulePackFiles interface {
+	// ListSiteRulePackVersions 返回本地可用的包版本，升序。宿主会滤掉校验不过和
+	// 已过期的版本，所以空列表是正常状态——还没下到包，或本地的包都过期了。
+	ListSiteRulePackVersions(ctx context.Context) ([]int64, error)
+	// ReadSiteRulePackFile 读取某个版本里的一个条目（manifest.json / manifest.sig
+	// / rules.bin）。name 必须是纯文件名，宿主会拒绝任何带路径分隔符或 .. 的名字，
+	// 并在每次读取时重新校验该版本是否仍然有效，插件绕不过这道门。
+	ReadSiteRulePackFile(ctx context.Context, version int64, name string) ([]byte, error)
+}
+
+// SiteRulePackKeys 派生与本实例绑定的密钥，供插件把规则包密钥封存到本地。
+//
+// 返回的是 HKDF 派生结果，不是实例长期密钥本身——与 CloudCredential 只发短期令牌
+// 是同一条边界。插件必须再叠一层自己的内嵌常量才得到最终的封存密钥，两半各挡一种
+// 攻击：宿主开源，改一行 dump 出来的只有派生结果，缺插件内嵌常量解不开缓存；缓存
+// 文件拷到另一台机器，那边的实例密钥不同，派生结果对不上。缺任何一层都不成立。
+//
+// 需要 host 权限 "site.rules.pack.keys"。
+type SiteRulePackKeys interface {
+	// InstanceKey 返回绑定到本实例与该包版本的 32 字节密钥。版本参与派生，换包
+	// 就换密钥，旧版本的缓存自然失效，不需要额外的清理逻辑。
+	InstanceKey(ctx context.Context, packVersion int64) ([]byte, error)
 }

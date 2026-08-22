@@ -53,6 +53,8 @@ type hostServicesState struct {
 	renderer              pluginsdk.PageRenderer
 	cloud                 pluginsdk.CloudIdentity
 	siteRules             pluginsdk.SiteRuleFiles
+	siteRulePacks         pluginsdk.SiteRulePackFiles
+	siteRulePackKeys      pluginsdk.SiteRulePackKeys
 }
 
 // hostServicesServer 是插件回调宿主的那一端。通道池会在每次租用前换掉 state，所以
@@ -681,6 +683,15 @@ type SiteRuleFileRequest struct {
 	Name string
 }
 
+type SiteRulePackFileRequest struct {
+	Version int64
+	Name    string
+}
+
+type SiteRulePackKeyRequest struct {
+	Version int64
+}
+
 // RendererAvailable 只报可用性，插件据此决定是否展示「浏览器仿真」开关。
 func (s *hostServicesServer) RendererAvailable(_ Empty, reply *JSONReply) error {
 	if s.live().renderer == nil {
@@ -765,6 +776,58 @@ func (s *hostServicesServer) ReadSiteRuleFile(req SiteRuleFileRequest, reply *By
 		return err
 	}
 	reply.Data = data
+	return nil
+}
+
+func (s *hostServicesServer) ListSiteRulePackVersions(_ Empty, reply *JSONReply) error {
+	if s.live().siteRulePacks == nil {
+		return fmt.Errorf("宿主未提供 SiteRulePackFiles")
+	}
+	if err := s.requireHostPermission("site.rules.pack.read"); err != nil {
+		return err
+	}
+	result, err := s.live().siteRulePacks.ListSiteRulePackVersions(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+// ReadSiteRulePackFile 返回原始字节：条目里最大的一项是 rules.bin，全是密文，
+// base64 化白白膨胀三分之一。版本与文件名的校验都在宿主实现侧，插件绕不过。
+func (s *hostServicesServer) ReadSiteRulePackFile(req SiteRulePackFileRequest, reply *BytesReply) error {
+	if s.live().siteRulePacks == nil {
+		return fmt.Errorf("宿主未提供 SiteRulePackFiles")
+	}
+	if err := s.requireHostPermission("site.rules.pack.read"); err != nil {
+		return err
+	}
+	data, err := s.live().siteRulePacks.ReadSiteRulePackFile(s.live().ctx, req.Version, req.Name)
+	if err != nil {
+		return err
+	}
+	reply.Data = data
+	return nil
+}
+
+// InstanceKey 交出的是按包版本派生的结果，不是实例长期密钥。插件还要叠一层自己的
+// 内嵌常量才得到最终的封存密钥——单独拿到这一半解不开任何东西。
+func (s *hostServicesServer) InstanceKey(req SiteRulePackKeyRequest, reply *BytesReply) error {
+	if s.live().siteRulePackKeys == nil {
+		return fmt.Errorf("宿主未提供 SiteRulePackKeys")
+	}
+	if err := s.requireHostPermission("site.rules.pack.keys"); err != nil {
+		return err
+	}
+	key, err := s.live().siteRulePackKeys.InstanceKey(s.live().ctx, req.Version)
+	if err != nil {
+		return err
+	}
+	reply.Data = key
 	return nil
 }
 
@@ -1278,6 +1341,31 @@ func (c *hostServicesClient) ListSiteRuleFiles(_ context.Context) ([]string, err
 func (c *hostServicesClient) ReadSiteRuleFile(_ context.Context, name string) ([]byte, error) {
 	var reply BytesReply
 	if err := c.call("Plugin.ReadSiteRuleFile", SiteRuleFileRequest{Name: name}, &reply); err != nil {
+		return nil, err
+	}
+	return reply.Data, nil
+}
+
+func (c *hostServicesClient) ListSiteRulePackVersions(_ context.Context) ([]int64, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListSiteRulePackVersions", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []int64
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ReadSiteRulePackFile(_ context.Context, version int64, name string) ([]byte, error) {
+	var reply BytesReply
+	if err := c.call("Plugin.ReadSiteRulePackFile", SiteRulePackFileRequest{Version: version, Name: name}, &reply); err != nil {
+		return nil, err
+	}
+	return reply.Data, nil
+}
+
+func (c *hostServicesClient) InstanceKey(_ context.Context, packVersion int64) ([]byte, error) {
+	var reply BytesReply
+	if err := c.call("Plugin.InstanceKey", SiteRulePackKeyRequest{Version: packVersion}, &reply); err != nil {
 		return nil, err
 	}
 	return reply.Data, nil

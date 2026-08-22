@@ -645,7 +645,13 @@ type Instance struct {
 	// SiteRules 只读访问宿主的站点规则目录（管理员自有规则）；
 	// 只在插件声明了 host 权限 "site.rules.read" 时由宿主注入。
 	SiteRules SiteRuleFiles
-	Runtime   *runtimesdk.Services
+	// SiteRulePacks 只读访问宿主缓存的加密站点规则包（密文，宿主不解密）；
+	// 只在插件声明了 host 权限 "site.rules.pack.read" 时由宿主注入。
+	SiteRulePacks SiteRulePackFiles
+	// SiteRulePackKeys 派生实例绑定密钥，供插件把规则包密钥封存到本地；
+	// 只在插件声明了 host 权限 "site.rules.pack.keys" 时由宿主注入。
+	SiteRulePackKeys SiteRulePackKeys
+	Runtime          *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。

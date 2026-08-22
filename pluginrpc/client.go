@@ -475,7 +475,7 @@ func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver
 		inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil || inst.Storages != nil ||
 		inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
 		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil || inst.Renderer != nil ||
-		inst.Cloud != nil || inst.SiteRules != nil
+		inst.Cloud != nil || inst.SiteRules != nil || inst.SiteRulePacks != nil || inst.SiteRulePackKeys != nil
 }
 
 func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (InstancePayload, func(), error) {
@@ -525,6 +525,8 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			renderer:              inst.Renderer,
 			cloud:                 inst.Cloud,
 			siteRules:             inst.SiteRules,
+			siteRulePacks:         inst.SiteRulePacks,
+			siteRulePackKeys:      inst.SiteRulePackKeys,
 		}
 		// 只对声明了复用的插件走池：老插件每次调用都会 Dial，而池化的通道已经被
 		// AcceptAndServe 消费掉了，它的第二次 Dial 会一直等不到人 accept。
