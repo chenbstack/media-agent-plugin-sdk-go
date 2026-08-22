@@ -102,3 +102,73 @@ func TestHostChannelReleaseRejectsLateCallbacks(t *testing.T) {
 		t.Fatalf("宿主被回调 %d 次，归还之后不该再有", kv.gets)
 	}
 }
+
+// 通道没等到插件连上来就不能进池：宿主的 accept 只等 5 秒，之后那个 broker id 就是
+// 死号，谁借到谁的调用先卡满 5 秒再失败。
+func TestHostChannelNotPooledWhenNeverAccepted(t *testing.T) {
+	pool := newHostChannelPool()
+	pool.live["inst-1"] = 1
+	channel := &hostChannel{id: 7, server: newHostServicesServer(&hostServicesState{ctx: context.Background()})}
+
+	pool.put("inst-1", channel)
+
+	pool.mu.Lock()
+	idle, live := len(pool.idle["inst-1"]), pool.live["inst-1"]
+	pool.mu.Unlock()
+	if idle != 0 {
+		t.Fatalf("没连上来的通道进了池，idle=%d", idle)
+	}
+	if live != 0 {
+		t.Fatalf("名额没交还，live=%d", live)
+	}
+}
+
+// 停止服务的通道要从池子里摘掉，名额一并交还：连接断了之后再借出去，那次调用必然失败。
+func TestHostChannelRetiredWhenServingEnds(t *testing.T) {
+	pool := newHostChannelPool()
+	pool.live["inst-1"] = 1
+	channel := &hostChannel{id: 9, server: newHostServicesServer(&hostServicesState{ctx: context.Background()})}
+	channel.accepted.Store(true)
+
+	pool.put("inst-1", channel)
+	pool.mu.Lock()
+	pooled := len(pool.idle["inst-1"])
+	pool.mu.Unlock()
+	if pooled != 1 {
+		t.Fatalf("连上过又正常归还的通道应当留在池里，idle=%d", pooled)
+	}
+
+	channel.finished.Store(true)
+	pool.retire("inst-1", channel)
+
+	pool.mu.Lock()
+	idle, live := len(pool.idle["inst-1"]), pool.live["inst-1"]
+	pool.mu.Unlock()
+	if idle != 0 || live != 0 {
+		t.Fatalf("停服的通道没摘干净，idle=%d live=%d", idle, live)
+	}
+}
+
+// 生产上真实发生过的那条路径：插件没实现这个方法，调用在组装实例句柄之前就返回了，
+// 那条已经开好的通道从头到尾没人 Dial。它要是留在池里，同一个实例之后的每一次调用都会
+// 借到这个死号，卡满 5 秒再失败，一直到插件进程重启为止。
+func TestHostChannelNotReusedAfterPluginNeverConnected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("要等满 broker accept 的 5 秒超时")
+	}
+	client := startBenchClient(t)
+	kv := &countingKV{}
+	inst := pluginsdk.Instance{ID: "inst-1", Name: "bench", KV: kv}
+
+	// 基准插件只实现了 ActionHandler，事件订阅这条会早退。
+	if err := client.HandleEventContext(context.Background(), inst, nil, pluginsdk.EventEnvelope{Type: "noop"}); err == nil {
+		t.Fatal("基准插件没实现事件订阅，这次调用应当失败")
+	}
+	// 等宿主那条通道的 accept 超时，死号才真的死掉。
+	time.Sleep(6 * time.Second)
+
+	runCallbackAction(t, client, inst)
+	if kv.gets != 1 {
+		t.Fatalf("宿主收到 %d 次回调，应当是 1 次", kv.gets)
+	}
+}
