@@ -84,11 +84,15 @@ const BrowseStorageInstance = "storage.instance"
 // ".<kind>"（例如 connection.media_server.emby）可由界面按连接类型过滤。
 const BrowseConnectionMediaServer = "connection.media_server"
 
-// BrowseAgentModel 让 select 字段渲染成「选一个宿主已配置的模型」，取值是模型 id。
+// BrowseAgentModel 让 select 字段渲染成「选一个宿主已配置的模型」，取值是模型 id
+// 或 DefaultTextModel。
 //
 // 候选项由宿主界面直接取模型列表填充，插件既不用实现 FieldOptions，也不用为了填
-// 一个下拉框去要 model.generate 之外的任何权限。空值表示用宿主的默认模型，所以这个
-// 字段通常不设 Required——用户没得选也能跑。
+// 一个下拉框去要 model.generate 之外的任何权限。列表里除了各个模型，还有一项显式的
+// 「跟随默认模型」。
+//
+// 这个字段应当设 Required：空值不会兜底成默认模型，宿主会直接拒绝。没配过模型就
+// 开始跑，等于把用户的媒体内容送进了一个用户从没做过判断的模型里。
 //
 // 界面会一并标出每个模型是本机还是远程：插件送进模型的往往是用户的媒体内容，
 // 选择在哪台机器上处理是用户的决定，不该藏在插件的实现里。

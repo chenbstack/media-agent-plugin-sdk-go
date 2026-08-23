@@ -21,7 +21,8 @@ type TextModel struct {
 	// 这类东西是用户的媒体内容，选了 remote 模型就意味着它们离开本机——这件事不能
 	// 只在宿主的模型设置页说一次，插件在自己的设置界面里也得能讲清楚。
 	DataEgress string `json:"data_egress"`
-	// Default 标记宿主的默认模型。插件配置里没让用户选时用的就是它。
+	// Default 标记这是宿主的默认模型。它只是个标记，不是兜底：插件想跟随默认，
+	// 得显式把 ModelID 填成 DefaultTextModel。
 	Default bool `json:"default"`
 	// AcceptImages / AcceptFiles 报告模型能不能收文本以外的输入。当前 GenerateText
 	// 只发纯文本，这两项是给插件做能力预判的（比如设置页里灰掉某个选项）。
@@ -29,11 +30,22 @@ type TextModel struct {
 	AcceptFiles  bool `json:"accept_files"`
 }
 
+// DefaultTextModel 是「跟随宿主的默认模型」这个选择本身的取值。
+//
+// 它存在的理由是：空串必须是错误，不能是「那就用默认的吧」。空串是**事故值**——
+// 插件的设置项没接线、用户从没保存过配置、配置读取失败，得到的都是空串。让它兜底
+// 成默认模型，意味着一个根本没配置过的插件照样把用户的媒体内容送进了某个模型，而
+// 那个模型是不是远程的、用户从没做过判断。跟随默认必须是用户在设置里点出来的一个
+// 选择，和点具体某个模型是同一个动作。
+const DefaultTextModel = "@default"
+
 // TextGenerationRequest 是一次生成请求。
 type TextGenerationRequest struct {
-	// ModelID 留空表示用宿主的默认模型。插件应该把它做成用户可选（配合
-	// BrowseAgentModel 渲染成下拉框），而不是写死——用户换模型不该要求插件改代码。
-	ModelID string `json:"model_id,omitempty"`
+	// ModelID 必填：某个具体模型的 id，或 DefaultTextModel。空串是错误，不会兜底。
+	//
+	// 插件应该把它做成用户可选（配合 BrowseAgentModel 渲染成下拉框），而不是写死——
+	// 用户换模型不该要求插件改代码。
+	ModelID string `json:"model_id"`
 	Prompt  string `json:"prompt"`
 	// MaxTokens 留空或非正数时由宿主按模型的 default_max_tokens 定，再兜底到宿主
 	// 自己的上限。插件给的值同样会被宿主按模型上下文窗口收敛。
@@ -43,8 +55,8 @@ type TextGenerationRequest struct {
 // TextGenerationResult 是一次生成的结果。
 type TextGenerationResult struct {
 	Output string `json:"output"`
-	// ModelID 是实际用了哪个模型。请求里留空走默认时，插件靠它写日志和落库，
-	// 免得事后分不清某份产出是哪个模型出的。
+	// ModelID 是实际用了哪个模型，永远是具体模型的 id，不会是 DefaultTextModel。
+	// 请求里跟随默认时，插件靠它写日志和落库，免得事后分不清某份产出是哪个模型出的。
 	ModelID string `json:"model_id"`
 }
 
@@ -59,7 +71,7 @@ type TextGeneration interface {
 	// ListTextModels 列出当前可用的模型。空列表是正常状态——用户还没配过模型。
 	// 插件应当据此在设置界面里说明「请先在本机模型里配置」，而不是报错。
 	ListTextModels(ctx context.Context) ([]TextModel, error)
-	// GenerateText 生成一段文本。模型未配置、未启用、或生成失败都返回错误，
-	// 插件不必区分——这些对用户是同一件事：这次没生成出来。
+	// GenerateText 生成一段文本。ModelID 为空、模型未配置、未启用、或生成失败都
+	// 返回错误，插件不必区分——这些对用户是同一件事：这次没生成出来。
 	GenerateText(ctx context.Context, req TextGenerationRequest) (TextGenerationResult, error)
 }
