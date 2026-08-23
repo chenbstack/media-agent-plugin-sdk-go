@@ -875,6 +875,7 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.SiteRules = services
 	inst.SiteRulePacks = services
 	inst.SiteRulePackKeys = services
+	inst.TextGeneration = services
 	return inst, nil
 }
 

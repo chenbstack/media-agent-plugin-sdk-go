@@ -55,6 +55,7 @@ type hostServicesState struct {
 	siteRules             pluginsdk.SiteRuleFiles
 	siteRulePacks         pluginsdk.SiteRulePackFiles
 	siteRulePackKeys      pluginsdk.SiteRulePackKeys
+	textGeneration        pluginsdk.TextGeneration
 }
 
 // hostServicesServer 是插件回调宿主的那一端。通道池会在每次租用前换掉 state，所以
@@ -692,6 +693,12 @@ type SiteRulePackKeyRequest struct {
 	Version int64
 }
 
+type TextGenerationRequest struct {
+	ModelID   string
+	Prompt    string
+	MaxTokens int
+}
+
 // RendererAvailable 只报可用性，插件据此决定是否展示「浏览器仿真」开关。
 func (s *hostServicesServer) RendererAvailable(_ Empty, reply *JSONReply) error {
 	if s.live().renderer == nil {
@@ -829,6 +836,50 @@ func (s *hostServicesServer) InstanceKey(req SiteRulePackKeyRequest, reply *Byte
 	}
 	reply.Data = key
 	return nil
+}
+
+// ListTextModels 只报 id、显示名和数据去向，不含 base_url、api_key 这些。
+// 消费方插件要的是「让用户选一个」，给多了就是白白扩大凭据的暴露面。
+func (s *hostServicesServer) ListTextModels(_ Empty, reply *JSONReply) error {
+	if s.live().textGeneration == nil {
+		return fmt.Errorf("宿主未提供 TextGeneration")
+	}
+	if err := s.requireHostPermission("model.generate"); err != nil {
+		return err
+	}
+	models, err := s.live().textGeneration.ListTextModels(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(models)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+// GenerateText 由宿主挑模型并持有凭据，插件只给 prompt。模型换后端、换服务商、
+// 换密钥，装好的插件都不需要知道。
+func (s *hostServicesServer) GenerateText(req TextGenerationRequest, reply *JSONReply) error {
+	if s.live().textGeneration == nil {
+		return fmt.Errorf("宿主未提供 TextGeneration")
+	}
+	if err := s.requireHostPermission("model.generate"); err != nil {
+		return err
+	}
+	result, err := s.live().textGeneration.GenerateText(s.live().ctx, pluginsdk.TextGenerationRequest{
+		ModelID:   req.ModelID,
+		Prompt:    req.Prompt,
+		MaxTokens: req.MaxTokens,
+	})
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
 }
 
 // WriteMirror 和 WriteSubtitle 一样只收 FileRef 不收路径：目标存储由用户的插件配置
@@ -1369,6 +1420,28 @@ func (c *hostServicesClient) InstanceKey(_ context.Context, packVersion int64) (
 		return nil, err
 	}
 	return reply.Data, nil
+}
+
+func (c *hostServicesClient) ListTextModels(_ context.Context) ([]pluginsdk.TextModel, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListTextModels", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.TextModel
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) GenerateText(_ context.Context, req pluginsdk.TextGenerationRequest) (pluginsdk.TextGenerationResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.GenerateText", TextGenerationRequest{
+		ModelID:   req.ModelID,
+		Prompt:    req.Prompt,
+		MaxTokens: req.MaxTokens,
+	}, &reply); err != nil {
+		return pluginsdk.TextGenerationResult{}, err
+	}
+	var result pluginsdk.TextGenerationResult
+	return result, decodeJSON(reply.Data, &result)
 }
 
 func (c *hostServicesClient) ListSiteAccounts(_ context.Context) ([]pluginsdk.SiteAccountInfo, error) {

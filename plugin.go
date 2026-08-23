@@ -651,7 +651,10 @@ type Instance struct {
 	// SiteRulePackKeys 派生实例绑定密钥，供插件把规则包密钥封存到本地；
 	// 只在插件声明了 host 权限 "site.rules.pack.keys" 时由宿主注入。
 	SiteRulePackKeys SiteRulePackKeys
-	Runtime          *runtimesdk.Services
+	// TextGeneration 借宿主已配置的模型生成文本，模型凭据不出宿主进程；
+	// 只在插件声明了 host 权限 "model.generate" 时由宿主注入。
+	TextGeneration TextGeneration
+	Runtime        *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。
