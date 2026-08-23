@@ -48,6 +48,7 @@ type hostServicesState struct {
 	entitlements          pluginsdk.Entitlements
 	pluginServices        pluginsdk.PluginServices
 	sidecars              pluginsdk.MediaSidecars
+	sidecarReader         pluginsdk.MediaSidecarReader
 	mirrors               pluginsdk.MediaMirrors
 	playback              pluginsdk.MediaPlayback
 	renderer              pluginsdk.PageRenderer
@@ -648,6 +649,52 @@ func (s *hostServicesServer) WriteSubtitle(req SubtitleWriteRequest, reply *JSON
 		*reply = out
 	}
 	return err
+}
+
+type SubtitleSidecarListRequest struct {
+	FileRef string
+}
+
+// ListSubtitles 列出这个媒体文件旁边已有的字幕。和写侧同一条作用域：插件给的是
+// FileRef，目录由宿主自己算。
+func (s *hostServicesServer) ListSubtitles(req SubtitleSidecarListRequest, reply *JSONReply) error {
+	if s.live().sidecarReader == nil {
+		return fmt.Errorf("宿主未提供 MediaSidecarReader")
+	}
+	if err := s.requireHostPermission("media.sidecar.read"); err != nil {
+		return err
+	}
+	result, err := s.live().sidecarReader.ListSubtitles(s.live().ctx, req.FileRef)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+type SubtitleSidecarReadRequest struct {
+	FileRef string
+	Name    string
+}
+
+// ReadSubtitle 读回一份字幕的原始字节。Name 必须是 ListSubtitles 列过的文件名，
+// 宿主那边会重新列一遍核对——插件递任意路径过来是拿不到东西的。
+func (s *hostServicesServer) ReadSubtitle(req SubtitleSidecarReadRequest, reply *BytesReply) error {
+	if s.live().sidecarReader == nil {
+		return fmt.Errorf("宿主未提供 MediaSidecarReader")
+	}
+	if err := s.requireHostPermission("media.sidecar.read"); err != nil {
+		return err
+	}
+	data, err := s.live().sidecarReader.ReadSubtitle(s.live().ctx, req.FileRef, req.Name)
+	if err != nil {
+		return err
+	}
+	reply.Data = data
+	return nil
 }
 
 type MirrorWriteRequest struct {
@@ -1330,6 +1377,23 @@ func (c *hostServicesClient) WriteSubtitle(_ context.Context, input pluginsdk.Su
 	}
 	var result pluginsdk.SubtitleWriteResult
 	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ListSubtitles(_ context.Context, fileRef string) ([]pluginsdk.SubtitleSidecar, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListSubtitles", SubtitleSidecarListRequest{FileRef: fileRef}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.SubtitleSidecar
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ReadSubtitle(_ context.Context, fileRef, name string) ([]byte, error) {
+	var reply BytesReply
+	if err := c.call("Plugin.ReadSubtitle", SubtitleSidecarReadRequest{FileRef: fileRef, Name: name}, &reply); err != nil {
+		return nil, err
+	}
+	return reply.Data, nil
 }
 
 func (c *hostServicesClient) WriteMirror(_ context.Context, input pluginsdk.MirrorWrite) (pluginsdk.MirrorWriteResult, error) {

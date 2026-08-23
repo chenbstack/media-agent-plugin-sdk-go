@@ -626,6 +626,10 @@ type Instance struct {
 	// Sidecars 把字幕这类随媒体文件存放的附属文件交给宿主落盘；只在插件声明了
 	// host 权限 "media.sidecar.write" 时由宿主注入。
 	Sidecars MediaSidecars
+	// SidecarReader 读回媒体文件旁边已有的字幕；只在插件声明了 host 权限
+	// "media.sidecar.read" 时由宿主注入。它和 Sidecars 分属两条权限，读到的是
+	// 用户的媒体内容，比落盘更该单独授权。
+	SidecarReader MediaSidecarReader
 	// Mirrors 把 .strm 这类"在另一个存储里按原相对路径生成的替身文件"交给宿主落盘；
 	// 只在插件声明了 host 权限 "media.mirror.write" 时由宿主注入。
 	Mirrors MediaMirrors

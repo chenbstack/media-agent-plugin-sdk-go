@@ -46,3 +46,37 @@ const (
 type MediaSidecars interface {
 	WriteSubtitle(ctx context.Context, input SubtitleWrite) (SubtitleWriteResult, error)
 }
+
+// SubtitleSidecar 是躺在某个媒体文件旁边的一份外挂字幕。
+//
+// 它由宿主列目录得来，不是按命名规则推算的——用户手工拷进去的字幕不遵守任何规则，
+// 靠推算会漏看，而漏看的代价是又生成一份重复的。
+type SubtitleSidecar struct {
+	// Name 是文件名，不含目录。回读时原样递给 ReadSubtitle，别自己拼路径。
+	Name string `json:"name"`
+	// Language 是宿主从文件名里解析出的语言段（zh-CN / en / ...）。解析不出为空 ——
+	// 那通常是用户手工放的、命名不带语言的那一份，不代表它没有语言。
+	Language string `json:"language,omitempty"`
+	// Ext 是不带点的扩展名，如 srt / ass。
+	Ext string `json:"ext,omitempty"`
+	// Forced 表示文件名里带 .forced 段：只翻译外语对白的那种字幕。拿它当翻译源会
+	// 得到一份只有零星几句的成品。
+	Forced bool `json:"forced,omitempty"`
+	// SizeBytes 是文件字节数，供插件在读之前决定要不要读。
+	SizeBytes int64 `json:"size_bytes,omitempty"`
+}
+
+// MediaSidecarReader 让插件读回媒体文件旁边已有的字幕。
+//
+// 它和 MediaSidecars 刻意分成两个接口、两条权限：写是「往用户的媒体目录里放东西」，
+// 读是「把用户的媒体内容取出来」，后者才是内容可能被送出这台机器的那一步。一个只
+// 需要落盘的字幕来源插件不该顺带获得读取用户已有字幕的能力。
+//
+// 需要 host 权限 "media.sidecar.read"。作用域和写侧一样收在 FileRef 上：插件只能
+// 读宿主点名交给它的那个媒体文件旁边的字幕，Name 必须来自 ListSubtitles 的返回。
+type MediaSidecarReader interface {
+	ListSubtitles(ctx context.Context, fileRef string) ([]SubtitleSidecar, error)
+	// ReadSubtitle 读回一份字幕的原始字节。name 必须是 ListSubtitles 列出来的文件名，
+	// 宿主不接受任意路径。
+	ReadSubtitle(ctx context.Context, fileRef, name string) ([]byte, error)
+}

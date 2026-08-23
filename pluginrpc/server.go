@@ -868,6 +868,7 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.Entitlements = services
 	inst.PluginServices = services
 	inst.Sidecars = services
+	inst.SidecarReader = services
 	inst.Mirrors = services
 	inst.Playback = services
 	inst.Renderer = services

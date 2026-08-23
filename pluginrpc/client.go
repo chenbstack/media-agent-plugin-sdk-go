@@ -474,7 +474,7 @@ func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver
 		inst.SiteAccounts != nil || inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil ||
 		inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil || inst.Storages != nil ||
 		inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
-		inst.Sidecars != nil || inst.Mirrors != nil || inst.Playback != nil || inst.Renderer != nil ||
+		inst.Sidecars != nil || inst.SidecarReader != nil || inst.Mirrors != nil || inst.Playback != nil || inst.Renderer != nil ||
 		inst.Cloud != nil || inst.SiteRules != nil || inst.SiteRulePacks != nil || inst.SiteRulePackKeys != nil ||
 		inst.TextGeneration != nil
 }
@@ -521,6 +521,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			entitlements:          inst.Entitlements,
 			pluginServices:        inst.PluginServices,
 			sidecars:              inst.Sidecars,
+			sidecarReader:         inst.SidecarReader,
 			mirrors:               inst.Mirrors,
 			playback:              inst.Playback,
 			renderer:              inst.Renderer,
