@@ -125,3 +125,30 @@ func TestParseLibraryRefreshPendingLanguagesAbsent(t *testing.T) {
 		t.Fatalf("缺字段时 Languages 应为空，实际 %v", got)
 	}
 }
+
+func TestParseLibraryRefreshPendingReadsOverview(t *testing.T) {
+	hook := ParseLibraryRefreshPending(map[string]any{
+		"subtitle_context": map[string]any{"overview": "一个少女寻找幼龙的旅程。"},
+	})
+	if hook.Context.Overview != "一个少女寻找幼龙的旅程。" {
+		t.Fatalf("overview = %q", hook.Context.Overview)
+	}
+}
+
+func TestParseLibraryRefreshPendingOverviewAbsent(t *testing.T) {
+	hook := ParseLibraryRefreshPending(map[string]any{"subtitle_context": map[string]any{}})
+	if hook.Context.Overview != "" {
+		t.Fatalf("overview = %q, want empty", hook.Context.Overview)
+	}
+}
+
+// MediaID 是插件去问 MediaMetadata 要元数据的钥匙，漏解析的表现是插件永远走
+// 「没有元数据」那条降级，不报任何错。
+func TestParseLibraryRefreshPendingReadsMediaID(t *testing.T) {
+	hook := ParseLibraryRefreshPending(map[string]any{
+		"media": map[string]any{"id": "m1", "type": "movie", "title": "辛特尔"},
+	})
+	if hook.MediaID != "m1" {
+		t.Fatalf("MediaID = %q", hook.MediaID)
+	}
+}

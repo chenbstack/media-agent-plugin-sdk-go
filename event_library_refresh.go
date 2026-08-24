@@ -35,6 +35,9 @@ type LibraryRefreshPending struct {
 	// MediaType 是 movie 或 series；Title 是媒体标题。
 	MediaType string
 	Title     string
+	// MediaID 是宿主媒体库里的 id，拿它去问 MediaMetadata 要元数据。
+	// 宿主还没把这个文件关联到媒体记录时为空。
+	MediaID string
 }
 
 // SubtitleTarget 是一个待配字幕的视频文件。
@@ -74,6 +77,9 @@ type SubtitleLookup struct {
 	Year          int
 	IMDBID        string
 	TMDBID        int64
+	// Overview 是媒体简介。它不参与检索，是给翻译类插件的语域线索——同一个词在
+	// 科幻片和古装剧里该怎么译不一样。宿主没抓到元数据时为空。
+	Overview string
 }
 
 // ParseLibraryRefreshPending 从事件 payload 里取出字幕插件要用的部分。
@@ -85,6 +91,7 @@ func ParseLibraryRefreshPending(payload map[string]any) LibraryRefreshPending {
 	media := payloadMap(payload, "media")
 	out.MediaType = payloadString(media, "type")
 	out.Title = payloadString(media, "title")
+	out.MediaID = payloadString(media, "id")
 
 	out.Languages = payloadStringList(payload, "subtitle_languages")
 
@@ -96,6 +103,7 @@ func ParseLibraryRefreshPending(payload map[string]any) LibraryRefreshPending {
 		Year:          payloadInt(lookup, "year"),
 		IMDBID:        payloadString(lookup, "imdb_id"),
 		TMDBID:        int64(payloadInt(lookup, "tmdb_id")),
+		Overview:      payloadString(lookup, "overview"),
 	}
 
 	for _, item := range payloadList(payload, "files_missing_subtitles") {

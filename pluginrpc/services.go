@@ -57,6 +57,7 @@ type hostServicesState struct {
 	siteRulePacks         pluginsdk.SiteRulePackFiles
 	siteRulePackKeys      pluginsdk.SiteRulePackKeys
 	textGeneration        pluginsdk.TextGeneration
+	mediaMetadata         pluginsdk.MediaMetadata
 }
 
 // hostServicesServer 是插件回调宿主的那一端。通道池会在每次租用前换掉 state，所以
@@ -746,6 +747,11 @@ type TextGenerationRequest struct {
 	MaxTokens int
 }
 
+type MediaMetadataDetailRequest struct {
+	MediaID  string
+	Language string
+}
+
 // RendererAvailable 只报可用性，插件据此决定是否展示「浏览器仿真」开关。
 func (s *hostServicesServer) RendererAvailable(_ Empty, reply *JSONReply) error {
 	if s.live().renderer == nil {
@@ -919,6 +925,26 @@ func (s *hostServicesServer) GenerateText(req TextGenerationRequest, reply *JSON
 		Prompt:    req.Prompt,
 		MaxTokens: req.MaxTokens,
 	})
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+// MediaMetadataDetail 由宿主解析 mediaID 属于哪个数据源、带凭据去取。插件报的是
+// 宿主的媒体 id，数据源的 ID 空间和密钥都不出宿主进程。
+func (s *hostServicesServer) MediaMetadataDetail(req MediaMetadataDetailRequest, reply *JSONReply) error {
+	if s.live().mediaMetadata == nil {
+		return fmt.Errorf("宿主未提供 MediaMetadata")
+	}
+	if err := s.requireHostPermission("media.metadata.read"); err != nil {
+		return err
+	}
+	result, err := s.live().mediaMetadata.Detail(s.live().ctx, req.MediaID, req.Language)
 	if err != nil {
 		return err
 	}
@@ -1505,6 +1531,18 @@ func (c *hostServicesClient) GenerateText(_ context.Context, req pluginsdk.TextG
 		return pluginsdk.TextGenerationResult{}, err
 	}
 	var result pluginsdk.TextGenerationResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) Detail(_ context.Context, mediaID, language string) (pluginsdk.MediaMetadataDetail, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.MediaMetadataDetail", MediaMetadataDetailRequest{
+		MediaID:  mediaID,
+		Language: language,
+	}, &reply); err != nil {
+		return pluginsdk.MediaMetadataDetail{}, err
+	}
+	var result pluginsdk.MediaMetadataDetail
 	return result, decodeJSON(reply.Data, &result)
 }
 

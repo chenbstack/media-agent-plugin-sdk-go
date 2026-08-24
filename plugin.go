@@ -658,7 +658,10 @@ type Instance struct {
 	// TextGeneration 借宿主已配置的模型生成文本，模型凭据不出宿主进程；
 	// 只在插件声明了 host 权限 "model.generate" 时由宿主注入。
 	TextGeneration TextGeneration
-	Runtime        *runtimesdk.Services
+	// MediaMetadata 按语言读取宿主媒体库里的元数据；
+	// 只在插件声明了 host 权限 "media.metadata.read" 时由宿主注入。
+	MediaMetadata MediaMetadata
+	Runtime       *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。

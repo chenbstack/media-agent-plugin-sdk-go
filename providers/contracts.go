@@ -471,6 +471,24 @@ type MetadataProvider interface {
 	FindByExternalID(ctx context.Context, ids MetaExternalIDs) ([]MetaSearchResult, error)
 }
 
+// LocalizedMetadataProvider 由能按指定语言返回详情的数据源实现。
+//
+// Detail 用的是数据源实例自己配置的那一种语言，对绝大多数场景够用。需要第二种语言的
+// 是这样一类消费方：它手里的原文和库里的译文得凑成对照才有意义。字幕翻译就是——
+// 台词里出现的是原文角色名，元数据里存的是译名，只给模型其中一侧，它对应不上：实测
+// 给一份纯中文角色名清单，模型照样把 Scales 译成「鳞片」而不是清单里的「鳞鳞」。
+//
+// 这是可选接口。宿主对没实现它的数据源退回 Detail，消费方按「拿不到第二语言」降级，
+// 不要因此失败。
+type LocalizedMetadataProvider interface {
+	MetadataProvider
+	// DetailInLanguage 按 language（BCP 47，如 en-US）返回详情。
+	//
+	// 数据源没有这门语言的译文时，返回它自己的默认值即可，不要报错——「没翻译」
+	// 和「查不到」是两回事，把前者报成错误会让调用方以为媒体不存在。
+	DetailInLanguage(ctx context.Context, mediaType, providerID, language string) (MetaDetail, error)
+}
+
 // ---- 模型提供方 ----
 
 var (
