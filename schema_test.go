@@ -411,3 +411,48 @@ func TestRegistry(t *testing.T) {
 		t.Error("CLI 插件缺 memory_limit_mb 应拒绝注册")
 	}
 }
+
+func TestSchemaPresetValidation(t *testing.T) {
+	base := []Field{
+		{Name: "model_name", Type: "string", Label: "模型"},
+		{Name: "gone", Type: "string", Label: "旧字段", Retired: true},
+	}
+	ok := ConfigSchema{
+		Fields: base,
+		Presets: []Preset{
+			{ID: "translate", Label: "字幕翻译", Description: "小模型", Values: map[string]string{"model_name": "hy-mt2"}},
+		},
+	}
+	if err := ok.validate("test"); err != nil {
+		t.Errorf("合法预设不应报错: %v", err)
+	}
+	parsed, err := ParseConfigSchema([]byte(`{
+		"fields": [{"name": "model_name", "type": "string", "label": "模型"}],
+		"presets": [{"id": "t", "label": "翻译", "description": "说明", "model_name": "x", "model_size": "1.1 GB", "memory_usage": "约 2 GB", "values": {"model_name": "x"}}]
+	}`))
+	if err != nil || len(parsed.Presets) != 1 || parsed.Presets[0].Description != "说明" ||
+		parsed.Presets[0].ModelName != "x" || parsed.Presets[0].ModelSize != "1.1 GB" ||
+		parsed.Presets[0].MemoryUsage != "约 2 GB" ||
+		parsed.Presets[0].Values["model_name"] != "x" {
+		t.Errorf("预设应完整解析: %+v, %v", parsed, err)
+	}
+
+	// 预设不参与 Validate：它只是往表单里填值，配置里看不出值是点出来的还是手填的。
+	normalized, err := ok.Validate(map[string]any{"model_name": "别的"})
+	if err != nil || normalized["model_name"] != "别的" {
+		t.Errorf("预设不应影响配置校验: %+v, %v", normalized, err)
+	}
+
+	for name, schema := range map[string]ConfigSchema{
+		"缺 label":     {Fields: base, Presets: []Preset{{ID: "a", Values: map[string]string{"model_name": "x"}}}},
+		"缺 id":        {Fields: base, Presets: []Preset{{Label: "A", Values: map[string]string{"model_name": "x"}}}},
+		"id 重复":       {Fields: base, Presets: []Preset{{ID: "a", Label: "A", Values: map[string]string{"model_name": "x"}}, {ID: "a", Label: "B", Values: map[string]string{"model_name": "y"}}}},
+		"没有取值":        {Fields: base, Presets: []Preset{{ID: "a", Label: "A"}}},
+		"字段不存在":       {Fields: base, Presets: []Preset{{ID: "a", Label: "A", Values: map[string]string{"nope": "x"}}}},
+		"字段已 retired": {Fields: base, Presets: []Preset{{ID: "a", Label: "A", Values: map[string]string{"gone": "x"}}}},
+	} {
+		if err := schema.validate("test"); err == nil {
+			t.Errorf("%s 的预设应报错", name)
+		}
+	}
+}

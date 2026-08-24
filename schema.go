@@ -15,6 +15,31 @@ type ConfigSchema struct {
 	// 渲染带标题的区块；未引用组的字段渲染在所有分组之前。分组只影响呈现，
 	// 不改变字段校验和存储。
 	Groups []FieldGroup `json:"groups,omitempty"`
+	// Presets 声明可一键填入的取值组合，前端渲染成一排可点的预设。选中它只是
+	// 把值写进表单，用户仍可继续改、仍要自己保存——所以预设不参与校验，也不
+	// 在存储里留痕，配置里看不出这份值是点出来的还是手填的。
+	Presets []Preset `json:"presets,omitempty"`
+}
+
+// Preset 是一组可一键填入表单的字段取值。
+//
+// 存在的理由是「知道该填什么」本身就是门槛：像模型仓库加量化文件名这种要跨两个
+// 字段、还得拼对大小写的取值，用户没法从下拉框里推出来。预设把插件作者已经验证
+// 过的组合摆出来，点一下就是一份能用的配置。
+type Preset struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Description 说明这份预设适合什么场景，前端展示在标签下方。
+	Description string `json:"description,omitempty"`
+	// ModelName 是预设实际填入的模型名，供前端在按钮中展示；未设置时前端可回退到 values.model_name。
+	ModelName string `json:"model_name,omitempty"`
+	// ModelSize 是模型文件或 Ollama 拉取包的约略大小。
+	ModelSize string `json:"model_size,omitempty"`
+	// MemoryUsage 是模型权重完整放入内存或显存时的约略占用基线，不含 KV Cache 等运行时开销。
+	MemoryUsage string `json:"memory_usage,omitempty"`
+	// Values 是字段名到取值的映射，键必须是本 schema 已声明且未撤掉的字段。
+	// 只覆盖列出的字段，没列到的保持用户当前的输入不动。
+	Values map[string]string `json:"values"`
 }
 
 // FieldGroup 是配置表单的一个呈现分组。
@@ -149,6 +174,27 @@ func (s ConfigSchema) validate(pluginID string) error {
 		}
 		if f.UI != nil && f.UI.Width != "" && f.UI.Width != "half" && f.UI.Width != "full" {
 			return fmt.Errorf("插件 %s: 字段 %s 的 ui.width 只能是 half 或 full", pluginID, f.Name)
+		}
+	}
+	presets := map[string]bool{}
+	for _, p := range s.Presets {
+		if p.ID == "" || p.Label == "" {
+			return fmt.Errorf("插件 %s: 预设必须有 id 和 label", pluginID)
+		}
+		if presets[p.ID] {
+			return fmt.Errorf("插件 %s: 预设 id 重复 %q", pluginID, p.ID)
+		}
+		presets[p.ID] = true
+		if len(p.Values) == 0 {
+			return fmt.Errorf("插件 %s: 预设 %s 没有任何取值", pluginID, p.ID)
+		}
+		for name := range p.Values {
+			// 预设写错字段名不会有任何运行时症状——点下去只是若干个字段没变，
+			// 看起来像预设「不管用」。这里挡住，让它在装包时就报出来。
+			field, ok := s.Field(name)
+			if !ok || field.Retired {
+				return fmt.Errorf("插件 %s: 预设 %s 引用了未声明的字段 %q", pluginID, p.ID, name)
+			}
 		}
 	}
 	return nil
