@@ -73,9 +73,9 @@ type SubtitleSidecar struct {
 // 需要落盘的字幕来源插件不该顺带获得读取用户已有字幕的能力。
 //
 // 需要 host 权限 "media.sidecar.read"。作用域和写侧一样收在 FileRef 上：插件只能
-// 读宿主点名交给它的那个媒体文件旁边的字幕，或宿主从本地下载副本抽取出的文本字幕
-// 轨道；Name 必须来自 ListSubtitles 的返回，插件拿不到路径，也不能要求宿主读取
-// 远程网盘视频。
+// 读宿主点名交给它的那个媒体文件旁边的字幕，或宿主从本地/SMB 下载副本抽取出的文本
+// 字幕轨道；Name 必须来自 ListSubtitles 的返回，插件拿不到路径，也不能要求宿主读取
+// WebDAV/网盘视频。
 type MediaSidecarReader interface {
 	ListSubtitles(ctx context.Context, fileRef string) ([]SubtitleSidecar, error)
 	// ReadSubtitle 读回一份字幕的原始字节。name 必须是 ListSubtitles 列出来的文件名，
