@@ -46,6 +46,7 @@ type hostServicesState struct {
 	schedules             pluginsdk.Schedules
 	settings              pluginsdk.Settings
 	entitlements          pluginsdk.Entitlements
+	entitlementProof      pluginsdk.EntitlementProofSource
 	pluginServices        pluginsdk.PluginServices
 	sidecars              pluginsdk.MediaSidecars
 	sidecarReader         pluginsdk.MediaSidecarReader
@@ -102,6 +103,22 @@ func (s *hostServicesServer) HasEntitlement(req EntitlementCheckRequest, reply *
 		return nil
 	}
 	reply.Granted = s.live().entitlements.HasEntitlement(s.live().ctx, strings.TrimSpace(req.Feature))
+	return nil
+}
+
+func (s *hostServicesServer) CurrentEntitlementProof(_ Empty, reply *JSONReply) error {
+	if s.live().entitlementProof == nil {
+		return fmt.Errorf("宿主未提供 entitlement proof")
+	}
+	proof, err := s.live().entitlementProof.CurrentEntitlementProof(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	encoded, err := encodeJSON(proof)
+	if err != nil {
+		return err
+	}
+	*reply = encoded
 	return nil
 }
 
@@ -1276,6 +1293,18 @@ func (c *hostServicesClient) call(method string, args, reply any) error {
 func (c *hostServicesClient) HasEntitlement(_ context.Context, feature string) bool {
 	var reply EntitlementCheckReply
 	return c.call("Plugin.HasEntitlement", EntitlementCheckRequest{Feature: feature}, &reply) == nil && reply.Granted
+}
+
+func (c *hostServicesClient) CurrentEntitlementProof(_ context.Context) (pluginsdk.SignedEntitlementProof, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.CurrentEntitlementProof", Empty{}, &reply); err != nil {
+		return pluginsdk.SignedEntitlementProof{}, err
+	}
+	var proof pluginsdk.SignedEntitlementProof
+	if err := decodeJSON(reply.Data, &proof); err != nil {
+		return pluginsdk.SignedEntitlementProof{}, err
+	}
+	return proof, nil
 }
 
 func (c *hostServicesClient) Reveal(ctx context.Context, ref, reason string) (string, error) {

@@ -37,12 +37,18 @@ func configHash(configJSON []byte) string {
 type hostConfigCache struct {
 	mu      sync.Mutex
 	entries map[string]hostConfigEntry
+	// history keeps a short per-instance trail so concurrent calls that were
+	// already sent an older digest can still be retried with the matching full
+	// config after a newer call updates the current entry.
+	history map[string][]hostConfigEntry
 }
 
 type hostConfigEntry struct {
 	hash       string
 	configJSON []byte
 }
+
+const maxConfigHistoryPerInstance = 4
 
 // prepare 返回本次该发的 ConfigJSON 与摘要。配置与上次相同时 ConfigJSON 为 nil。
 func (c *hostConfigCache) prepare(instanceID string, configJSON []byte) ([]byte, string) {
@@ -63,26 +69,43 @@ func (c *hostConfigCache) prepare(instanceID string, configJSON []byte) ([]byte,
 	if c.entries == nil {
 		c.entries = make(map[string]hostConfigEntry)
 	}
+	if c.history == nil {
+		c.history = make(map[string][]hostConfigEntry)
+	}
+	if previous, ok := c.entries[instanceID]; ok {
+		c.history[instanceID] = append([]hostConfigEntry{previous}, c.history[instanceID]...)
+		if len(c.history[instanceID]) > maxConfigHistoryPerInstance {
+			c.history[instanceID] = c.history[instanceID][:maxConfigHistoryPerInstance]
+		}
+	}
 	c.entries[instanceID] = hostConfigEntry{hash: hash, configJSON: configJSON}
 	return configJSON, hash
 }
 
-// forget 丢掉某实例的记录并交出缓存的配置字节，供插件报未命中后重试用。
-func (c *hostConfigCache) forget(instanceID string) []byte {
+// fullConfig returns the exact config bytes for a failed digest. It deliberately
+// does not delete the current entry: concurrent requests may all observe the
+// same missing plugin-side digest and each needs a copy to retry. Keeping the
+// entry also means a transient retry/transport failure will self-heal on the
+// next request instead of losing the only full config permanently.
+func (c *hostConfigCache) fullConfig(instanceID, hash string) []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry, ok := c.entries[instanceID]
-	if !ok {
-		return nil
+	if entry, ok := c.entries[instanceID]; ok && entry.hash == hash {
+		return append([]byte(nil), entry.configJSON...)
 	}
-	delete(c.entries, instanceID)
-	return entry.configJSON
+	for _, entry := range c.history[instanceID] {
+		if entry.hash == hash {
+			return append([]byte(nil), entry.configJSON...)
+		}
+	}
+	return nil
 }
 
 func (c *hostConfigCache) evictLocked() {
 	for len(c.entries) >= maxCachedConfigs {
 		for key := range c.entries {
 			delete(c.entries, key)
+			delete(c.history, key)
 			break
 		}
 	}

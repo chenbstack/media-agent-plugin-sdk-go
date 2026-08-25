@@ -79,8 +79,8 @@ func TestClientReusesConfigByDigest(t *testing.T) {
 	if got := run(); got != "abc" {
 		t.Fatalf("插件缓存丢失后 = %q，宿主没有补发完整配置", got)
 	}
-	if client.hasCachedConfig("inst-1") {
-		t.Fatal("补发之后宿主应先丢掉记录，让下一次重新对齐")
+	if !client.hasCachedConfig("inst-1") {
+		t.Fatal("补发之后宿主仍应保留记录，供并发请求或下一次重试使用")
 	}
 
 	// 配置变了要整份重发，插件不能还用旧的。
@@ -115,6 +115,27 @@ func TestClientTreatsPluginWithoutFeaturesAsLegacy(t *testing.T) {
 	defer release()
 	if len(payload.ConfigJSON) == 0 || payload.ConfigHash != "" {
 		t.Fatalf("payload = %+v，老插件必须收到完整配置", payload)
+	}
+}
+
+func TestHostConfigCacheRetainsConcurrentDigestHistory(t *testing.T) {
+	cache := &hostConfigCache{}
+	first, firstHash := cache.prepare("global", []byte(`{"version":1}`))
+	if string(first) != `{"version":1}` {
+		t.Fatalf("first config = %s", first)
+	}
+	second, secondHash := cache.prepare("global", []byte(`{"version":2}`))
+	if string(second) != `{"version":2}` || firstHash == secondHash {
+		t.Fatalf("second config/hash = %s/%s", second, secondHash)
+	}
+	if got := string(cache.fullConfig("global", firstHash)); got != `{"version":1}` {
+		t.Fatalf("old digest config = %q", got)
+	}
+	if got := string(cache.fullConfig("global", firstHash)); got != `{"version":1}` {
+		t.Fatalf("repeated old digest config = %q", got)
+	}
+	if got := string(cache.fullConfig("global", secondHash)); got != `{"version":2}` {
+		t.Fatalf("current digest config = %q", got)
 	}
 }
 

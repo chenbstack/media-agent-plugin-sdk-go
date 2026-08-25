@@ -601,20 +601,21 @@ type KVStore interface {
 // Instance 是一个已校验的连接实例配置（downloaders/media_servers 表中的一行）。
 // Config 中 secret 字段的值是 secrets 表引用，需通过 SecretResolver 解密。
 type Instance struct {
-	ID            string
-	Name          string
-	Config        map[string]any
-	KV            KVStore
-	DB            PluginDB
-	Logger        Logger
-	Settings      Settings
-	Entitlements  Entitlements
-	SiteAccounts  SiteAccounts
-	Subscriptions Subscriptions
-	Downloads     Downloads
-	Transfers     Transfers
-	Rules         Rules
-	Connections   Connections
+	ID               string
+	Name             string
+	Config           map[string]any
+	KV               KVStore
+	DB               PluginDB
+	Logger           Logger
+	Settings         Settings
+	Entitlements     Entitlements
+	EntitlementProof EntitlementProofSource
+	SiteAccounts     SiteAccounts
+	Subscriptions    Subscriptions
+	Downloads        Downloads
+	Transfers        Transfers
+	Rules            Rules
+	Connections      Connections
 	// ConnectionCredentials reveals a provider-declared secret from an existing
 	// connection after a separate high-risk host permission check.
 	ConnectionCredentials ConnectionCredentials

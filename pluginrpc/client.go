@@ -425,8 +425,8 @@ func (c *Client) withFullConfig(args any) (any, bool) {
 	if !ok {
 		return nil, false
 	}
-	// forget 顺带丢掉本地记录：下一次调用会重新整份发一遍，两边由此重新对齐。
-	configJSON := c.configs.forget(payload.ID)
+	// 保留本地记录：并发请求可能同时命中同一个失效摘要，必须都能拿到完整配置重试。
+	configJSON := c.configs.fullConfig(payload.ID, payload.ConfigHash)
 	if configJSON == nil {
 		return nil, false
 	}
@@ -476,7 +476,7 @@ func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver
 		inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
 		inst.Sidecars != nil || inst.SidecarReader != nil || inst.Mirrors != nil || inst.Playback != nil || inst.Renderer != nil ||
 		inst.Cloud != nil || inst.SiteRules != nil || inst.SiteRulePacks != nil || inst.SiteRulePackKeys != nil ||
-		inst.TextGeneration != nil || inst.MediaMetadata != nil
+		inst.TextGeneration != nil || inst.MediaMetadata != nil || inst.EntitlementProof != nil
 }
 
 func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (InstancePayload, func(), error) {
@@ -531,6 +531,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			siteRulePackKeys:      inst.SiteRulePackKeys,
 			textGeneration:        inst.TextGeneration,
 			mediaMetadata:         inst.MediaMetadata,
+			entitlementProof:      inst.EntitlementProof,
 		}
 		// 只对声明了复用的插件走池：老插件每次调用都会 Dial，而池化的通道已经被
 		// AcceptAndServe 消费掉了，它的第二次 Dial 会一直等不到人 accept。
