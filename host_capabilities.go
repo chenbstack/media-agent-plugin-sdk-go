@@ -98,9 +98,6 @@ type EpisodeSelection struct {
 type SubscriptionWrite struct {
 	TargetID       string `json:"target_id,omitempty"`
 	IdempotencyKey string `json:"idempotency_key"`
-	// RequestID links a host-managed media request to the subscription created
-	// for it, so the host can finalize the request when processing completes.
-	RequestID string `json:"request_id,omitempty"`
 	// OwnerID asks the host to create or merge the subscription for this user.
 	// Hosts must reject cross-user attribution unless the plugin was explicitly
 	// granted the dedicated create-for-user permission.
