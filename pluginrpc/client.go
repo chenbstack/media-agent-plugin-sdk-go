@@ -225,6 +225,27 @@ func (c *Client) HandleEventContext(ctx context.Context, inst pluginsdk.Instance
 	return c.call(ctx, "Plugin.HandleEvent", EventRequest{Instance: payload, EventJSON: eventJSON}, &reply)
 }
 
+func (c *Client) HandleEventResultContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, event pluginsdk.EventEnvelope) (pluginsdk.EventResult, error) {
+	payload, release, err := c.instancePayload(ctx, inst, secrets)
+	if err != nil {
+		return pluginsdk.EventResult{}, err
+	}
+	defer release()
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return pluginsdk.EventResult{}, err
+	}
+	var reply JSONReply
+	if err := c.call(ctx, "Plugin.HandleEventResult", EventRequest{Instance: payload, EventJSON: eventJSON}, &reply); err != nil {
+		return pluginsdk.EventResult{}, err
+	}
+	var out pluginsdk.EventResult
+	if err := decodeJSON(reply.Data, &out); err != nil {
+		return pluginsdk.EventResult{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) RunActionContext(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver, actionID string, input map[string]any) (pluginsdk.ActionResult, error) {
 	payload, release, err := c.instancePayload(ctx, inst, secrets)
 	if err != nil {
@@ -640,6 +661,16 @@ func (s *eventSubscriber) HandleEvent(ctx context.Context, event pluginsdk.Event
 	return s.external.withClientOperation(ctx, "plugin.event.handle", func(c *Client) error {
 		return c.HandleEventContext(ctx, s.inst, s.secrets, event)
 	})
+}
+
+func (s *eventSubscriber) HandleEventResult(ctx context.Context, event pluginsdk.EventEnvelope) (pluginsdk.EventResult, error) {
+	var out pluginsdk.EventResult
+	err := s.external.withClientOperation(ctx, "plugin.event.handle_result", func(c *Client) error {
+		var err error
+		out, err = c.HandleEventResultContext(ctx, s.inst, s.secrets, event)
+		return err
+	})
+	return out, err
 }
 
 func (p *cookieSourceProvider) Kind() string {
