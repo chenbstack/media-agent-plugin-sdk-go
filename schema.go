@@ -109,6 +109,17 @@ const BrowseStorageInstance = "storage.instance"
 // ".<kind>"（例如 connection.media_server.emby）可由界面按连接类型过滤。
 const BrowseConnectionMediaServer = "connection.media_server"
 
+// BrowseConnectionDownloader 让 select / multiselect 字段引用宿主已有的下载器连接；
+// 追加 ".<kind>"（例如 connection.downloader.qbittorrent）可由界面按连接类型过滤。
+const BrowseConnectionDownloader = "connection.downloader"
+
+// BrowseConnectionSite 让 select / multiselect 字段引用宿主已有的站点连接；追加
+// ".<kind>" 可由界面按站点类型过滤。
+//
+// 取值是站点账号 id，与种子池记录上的 SiteAccountID 是同一个东西——插件因此不必为了
+// 填一个下拉框去要 site.accounts.read。
+const BrowseConnectionSite = "connection.site"
+
 // BrowseAgentModel 让 select 字段渲染成「选一个宿主已配置的模型」，取值是模型 id
 // 或 DefaultTextModel。
 //
@@ -415,9 +426,12 @@ func (f Field) optionsFilledByHost() bool {
 	if f.UI == nil {
 		return false
 	}
-	return f.UI.Browse == BrowseStorageInstance ||
-		f.UI.Browse == BrowseConnectionMediaServer ||
-		strings.HasPrefix(f.UI.Browse, BrowseConnectionMediaServer+".")
+	for _, browse := range []string{BrowseConnectionMediaServer, BrowseConnectionDownloader, BrowseConnectionSite} {
+		if f.UI.Browse == browse || strings.HasPrefix(f.UI.Browse, browse+".") {
+			return true
+		}
+	}
+	return f.UI.Browse == BrowseStorageInstance
 }
 
 // stringList 把 multiselect 的取值归一成字符串切片。

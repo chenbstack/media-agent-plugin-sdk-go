@@ -639,9 +639,19 @@ type Instance struct {
 	SiteAccounts     SiteAccounts
 	Subscriptions    Subscriptions
 	Downloads        Downloads
-	Transfers        Transfers
-	Rules            Rules
-	Connections      Connections
+	// DownloadTasks 只读地看下载任务的实时状态，包括宿主和别的插件建的；
+	// 只在插件声明了 host 权限 "downloads.tasks.read" 时由宿主注入。
+	DownloadTasks DownloadTasks
+	// DownloadControl 操作下载器（加种、暂停、删种、选文件）；只在插件声明了
+	// host 权限 "downloads.control" 时由宿主注入。它能删掉任何任务及其文件，
+	// 是权限面最大的一项能力。
+	DownloadControl DownloadControl
+	// TorrentPool 只读地取用宿主抓下来的站点种子池，附带「宿主还要不要它」的
+	// 裁决；只在插件声明了 host 权限 "site.torrents.pool.read" 时由宿主注入。
+	TorrentPool SiteTorrentPool
+	Transfers   Transfers
+	Rules       Rules
+	Connections Connections
 	// ConnectionCredentials reveals a provider-declared secret from an existing
 	// connection after a separate high-risk host permission check.
 	ConnectionCredentials ConnectionCredentials

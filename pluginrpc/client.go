@@ -492,7 +492,8 @@ func isUnknownRPCMethod(err error) bool {
 // 都没有。所以判定集中在这里，并由测试逐项守着。
 func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) bool {
 	return secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil ||
-		inst.SiteAccounts != nil || inst.Subscriptions != nil || inst.Downloads != nil || inst.Transfers != nil ||
+		inst.SiteAccounts != nil || inst.Subscriptions != nil || inst.Downloads != nil || inst.DownloadTasks != nil ||
+		inst.DownloadControl != nil || inst.TorrentPool != nil || inst.Transfers != nil ||
 		inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil || inst.Storages != nil ||
 		inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
 		inst.Sidecars != nil || inst.SidecarReader != nil || inst.Mirrors != nil || inst.Playback != nil || inst.Renderer != nil ||
@@ -532,6 +533,9 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			siteAccounts:          inst.SiteAccounts,
 			subscriptions:         inst.Subscriptions,
 			downloads:             inst.Downloads,
+			downloadTasks:         inst.DownloadTasks,
+			downloadControl:       inst.DownloadControl,
+			torrentPool:           inst.TorrentPool,
 			transfers:             inst.Transfers,
 			rules:                 inst.Rules,
 			connections:           inst.Connections,

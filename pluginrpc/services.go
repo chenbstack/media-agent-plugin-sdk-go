@@ -38,6 +38,9 @@ type hostServicesState struct {
 	siteAccounts          pluginsdk.SiteAccounts
 	subscriptions         pluginsdk.Subscriptions
 	downloads             pluginsdk.Downloads
+	downloadTasks         pluginsdk.DownloadTasks
+	downloadControl       pluginsdk.DownloadControl
+	torrentPool           pluginsdk.SiteTorrentPool
 	transfers             pluginsdk.Transfers
 	rules                 pluginsdk.Rules
 	connections           pluginsdk.Connections
@@ -324,6 +327,32 @@ type DownloadFindRequest struct {
 type DownloadFindReply struct {
 	Found  bool
 	Result pluginsdk.HostWriteResult
+}
+
+type DownloadTaskQueryRequest struct {
+	Query pluginsdk.DownloadTaskQuery
+}
+
+type DownloadTaskIDRequest struct {
+	TaskID string
+}
+
+type DownloadTaskRemoveRequest struct {
+	TaskID     string
+	DeleteData bool
+}
+
+type DownloadFileSelectionRequest struct {
+	TaskID string
+	Files  []pluginsdk.DownloadFileSelection
+}
+
+type AddTorrentRequest struct {
+	Input pluginsdk.AddTorrentInput
+}
+
+type PoolTorrentQueryRequest struct {
+	Query pluginsdk.PoolTorrentQuery
 }
 
 type TransferUpsertRequest struct {
@@ -1077,6 +1106,180 @@ func (s *hostServicesServer) FindDownloadByHash(req DownloadFindRequest, reply *
 	return nil
 }
 
+// 下载任务只读与下载器控制分属两条权限：看得到不等于动得了。每个处理器都先确认
+// 宿主真的注入了对应能力，再查权限——没注入时给的是"宿主未提供"，与"没授权"区分开，
+// 免得排查时把两种原因混在一起。
+
+func (s *hostServicesServer) ListDownloaders(_ Empty, reply *JSONReply) error {
+	if s.live().downloadTasks == nil {
+		return fmt.Errorf("宿主未提供 DownloadTasks")
+	}
+	if err := s.requireHostPermission("downloads.tasks.read"); err != nil {
+		return err
+	}
+	result, err := s.live().downloadTasks.ListDownloaders(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) ListDownloadTasks(req DownloadTaskQueryRequest, reply *JSONReply) error {
+	if s.live().downloadTasks == nil {
+		return fmt.Errorf("宿主未提供 DownloadTasks")
+	}
+	if err := s.requireHostPermission("downloads.tasks.read"); err != nil {
+		return err
+	}
+	result, err := s.live().downloadTasks.ListTasks(s.live().ctx, req.Query)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) GetDownloadTask(req DownloadTaskIDRequest, reply *JSONReply) error {
+	if s.live().downloadTasks == nil {
+		return fmt.Errorf("宿主未提供 DownloadTasks")
+	}
+	if err := s.requireHostPermission("downloads.tasks.read"); err != nil {
+		return err
+	}
+	result, err := s.live().downloadTasks.GetTask(s.live().ctx, req.TaskID)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) ListDownloadTaskFiles(req DownloadTaskIDRequest, reply *JSONReply) error {
+	if s.live().downloadTasks == nil {
+		return fmt.Errorf("宿主未提供 DownloadTasks")
+	}
+	if err := s.requireHostPermission("downloads.tasks.read"); err != nil {
+		return err
+	}
+	result, err := s.live().downloadTasks.ListTaskFiles(s.live().ctx, req.TaskID)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) AddTorrent(req AddTorrentRequest, reply *JSONReply) error {
+	if s.live().downloadControl == nil {
+		return fmt.Errorf("宿主未提供 DownloadControl")
+	}
+	if err := s.requireHostPermission("downloads.control"); err != nil {
+		return err
+	}
+	result, err := s.live().downloadControl.AddTorrent(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
+func (s *hostServicesServer) PauseDownloadTask(req DownloadTaskIDRequest, reply *JSONReply) error {
+	if s.live().downloadControl == nil {
+		return fmt.Errorf("宿主未提供 DownloadControl")
+	}
+	if err := s.requireHostPermission("downloads.control"); err != nil {
+		return err
+	}
+	if err := s.live().downloadControl.PauseTask(s.live().ctx, req.TaskID); err != nil {
+		return err
+	}
+	*reply = JSONReply{}
+	return nil
+}
+
+func (s *hostServicesServer) ResumeDownloadTask(req DownloadTaskIDRequest, reply *JSONReply) error {
+	if s.live().downloadControl == nil {
+		return fmt.Errorf("宿主未提供 DownloadControl")
+	}
+	if err := s.requireHostPermission("downloads.control"); err != nil {
+		return err
+	}
+	if err := s.live().downloadControl.ResumeTask(s.live().ctx, req.TaskID); err != nil {
+		return err
+	}
+	*reply = JSONReply{}
+	return nil
+}
+
+func (s *hostServicesServer) RemoveDownloadTask(req DownloadTaskRemoveRequest, reply *JSONReply) error {
+	if s.live().downloadControl == nil {
+		return fmt.Errorf("宿主未提供 DownloadControl")
+	}
+	if err := s.requireHostPermission("downloads.control"); err != nil {
+		return err
+	}
+	if err := s.live().downloadControl.RemoveTask(s.live().ctx, req.TaskID, req.DeleteData); err != nil {
+		return err
+	}
+	*reply = JSONReply{}
+	return nil
+}
+
+func (s *hostServicesServer) SetDownloadFileSelection(req DownloadFileSelectionRequest, reply *JSONReply) error {
+	if s.live().downloadControl == nil {
+		return fmt.Errorf("宿主未提供 DownloadControl")
+	}
+	if err := s.requireHostPermission("downloads.control"); err != nil {
+		return err
+	}
+	if err := s.live().downloadControl.SetFileSelection(s.live().ctx, req.TaskID, req.Files); err != nil {
+		return err
+	}
+	*reply = JSONReply{}
+	return nil
+}
+
+func (s *hostServicesServer) ListPoolTorrents(req PoolTorrentQueryRequest, reply *JSONReply) error {
+	if s.live().torrentPool == nil {
+		return fmt.Errorf("宿主未提供 SiteTorrentPool")
+	}
+	if err := s.requireHostPermission("site.torrents.pool.read"); err != nil {
+		return err
+	}
+	result, err := s.live().torrentPool.ListPoolTorrents(s.live().ctx, req.Query)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *hostServicesServer) UpsertTransfer(req TransferUpsertRequest, reply *JSONReply) error {
 	if s.live().transfers == nil {
 		return fmt.Errorf("宿主未提供 Transfers")
@@ -1626,6 +1829,98 @@ func (c *hostServicesClient) FindDownloadByHash(ctx context.Context, hash string
 		return pluginsdk.HostWriteResult{}, false, err
 	}
 	return reply.Result, reply.Found, nil
+}
+
+func (c *hostServicesClient) ListDownloaders(ctx context.Context) ([]pluginsdk.DownloaderInfo, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListDownloaders", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.DownloaderInfo
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) ListTasks(ctx context.Context, query pluginsdk.DownloadTaskQuery) ([]pluginsdk.DownloadTaskInfo, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListDownloadTasks", DownloadTaskQueryRequest{Query: query}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.DownloadTaskInfo
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) GetTask(ctx context.Context, taskID string) (pluginsdk.DownloadTaskInfo, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.GetDownloadTask", DownloadTaskIDRequest{TaskID: taskID}, &reply); err != nil {
+		return pluginsdk.DownloadTaskInfo{}, err
+	}
+	var result pluginsdk.DownloadTaskInfo
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.DownloadTaskInfo{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) ListTaskFiles(ctx context.Context, taskID string) ([]pluginsdk.DownloadFileInfo, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListDownloadTaskFiles", DownloadTaskIDRequest{TaskID: taskID}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.DownloadFileInfo
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) AddTorrent(ctx context.Context, input pluginsdk.AddTorrentInput) (pluginsdk.DownloadTaskInfo, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.AddTorrent", AddTorrentRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.DownloadTaskInfo{}, err
+	}
+	var result pluginsdk.DownloadTaskInfo
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.DownloadTaskInfo{}, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) PauseTask(ctx context.Context, taskID string) error {
+	var reply JSONReply
+	return c.call("Plugin.PauseDownloadTask", DownloadTaskIDRequest{TaskID: taskID}, &reply)
+}
+
+func (c *hostServicesClient) ResumeTask(ctx context.Context, taskID string) error {
+	var reply JSONReply
+	return c.call("Plugin.ResumeDownloadTask", DownloadTaskIDRequest{TaskID: taskID}, &reply)
+}
+
+func (c *hostServicesClient) RemoveTask(ctx context.Context, taskID string, deleteData bool) error {
+	var reply JSONReply
+	return c.call("Plugin.RemoveDownloadTask", DownloadTaskRemoveRequest{TaskID: taskID, DeleteData: deleteData}, &reply)
+}
+
+func (c *hostServicesClient) SetFileSelection(ctx context.Context, taskID string, files []pluginsdk.DownloadFileSelection) error {
+	var reply JSONReply
+	return c.call("Plugin.SetDownloadFileSelection", DownloadFileSelectionRequest{TaskID: taskID, Files: files}, &reply)
+}
+
+func (c *hostServicesClient) ListPoolTorrents(ctx context.Context, query pluginsdk.PoolTorrentQuery) ([]pluginsdk.PoolTorrent, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListPoolTorrents", PoolTorrentQueryRequest{Query: query}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.PoolTorrent
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (c *hostServicesClient) UpsertTransfer(ctx context.Context, input pluginsdk.TransferWrite) (pluginsdk.HostWriteResult, error) {
