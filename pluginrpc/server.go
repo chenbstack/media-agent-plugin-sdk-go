@@ -274,6 +274,39 @@ func (s *rpcServer) HandleEvent(req EventRequest, reply *Empty) error {
 	return subscriber.HandleEvent(context.Background(), event)
 }
 
+func (s *rpcServer) HandleEventResult(req EventRequest, reply *JSONReply) error {
+	if s.plugin.NewEventSubscriber == nil {
+		return fmt.Errorf("插件未实现事件订阅")
+	}
+	inst, secrets, closeFn, err := s.instance(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	var event pluginsdk.EventEnvelope
+	if err := json.Unmarshal(req.EventJSON, &event); err != nil {
+		return err
+	}
+	subscriber, err := s.plugin.NewEventSubscriber(context.Background(), inst, secrets)
+	if err != nil {
+		return err
+	}
+	withResult, ok := subscriber.(pluginsdk.EventSubscriberWithResult)
+	if !ok {
+		return fmt.Errorf("插件未实现事件结果")
+	}
+	result, err := withResult.HandleEventResult(context.Background(), event)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *rpcServer) RunAction(req ActionRunRequest, reply *JSONReply) error {
 	if s.plugin.NewActionHandler == nil {
 		return fmt.Errorf("插件未实现 ActionHandler")

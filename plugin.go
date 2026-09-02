@@ -584,6 +584,32 @@ type EventSubscriber interface {
 	HandleEvent(ctx context.Context, event EventEnvelope) error
 }
 
+// EventResult is the bounded, user-facing business outcome of an event hook.
+// The host validates and associates FileRef values with its own subscription
+// items; plugins must never submit subscription or episode IDs directly.
+type EventResult struct {
+	Status      string            `json:"status,omitempty"`
+	ReasonCode  string            `json:"reason_code,omitempty"`
+	Message     string            `json:"message,omitempty"`
+	Details     map[string]any    `json:"details,omitempty"`
+	ItemResults []EventItemResult `json:"items,omitempty"`
+}
+
+type EventItemResult struct {
+	FileRef    string         `json:"file_ref,omitempty"`
+	ItemID     string         `json:"item_id,omitempty"`
+	Status     string         `json:"status,omitempty"`
+	ReasonCode string         `json:"reason_code,omitempty"`
+	Message    string         `json:"message,omitempty"`
+	Details    map[string]any `json:"details,omitempty"`
+}
+
+// EventSubscriberWithResult is optional so plugins compiled against older SDK
+// versions remain valid. The host falls back to EventSubscriber when absent.
+type EventSubscriberWithResult interface {
+	HandleEventResult(context.Context, EventEnvelope) (EventResult, error)
+}
+
 // SecretResolver 由宿主注入，插件按引用解密密钥；每次读取都会写审计。
 type SecretResolver interface {
 	Reveal(ctx context.Context, ref, reason string) (string, error)

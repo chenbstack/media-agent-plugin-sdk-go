@@ -100,6 +100,16 @@ func (s *persistentEventSubscriber) HandleEvent(ctx context.Context, event plugi
 	})
 }
 
+func (s *persistentEventSubscriber) HandleEventResult(ctx context.Context, event pluginsdk.EventEnvelope) (pluginsdk.EventResult, error) {
+	var out pluginsdk.EventResult
+	err := s.session.withClient(ctx, "plugin.event.handle_result", func(c *Client) error {
+		var err error
+		out, err = c.HandleEventResultContext(ctx, s.inst, s.secrets, event)
+		return err
+	})
+	return out, err
+}
+
 type persistentActionHandler struct {
 	session providerSession
 	inst    pluginsdk.Instance
