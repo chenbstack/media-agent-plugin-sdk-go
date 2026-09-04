@@ -894,6 +894,7 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.DownloadTasks = services
 	inst.DownloadControl = services
 	inst.TorrentPool = services
+	inst.TorrentPoolRefresh = services
 	inst.Transfers = services
 	inst.Rules = services
 	inst.Connections = services

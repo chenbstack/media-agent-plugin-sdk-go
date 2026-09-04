@@ -46,12 +46,20 @@ func (memoryTorrentPool) ListPoolTorrents(context.Context, pluginsdk.PoolTorrent
 	return []pluginsdk.PoolTorrent{{ID: "pool-1", Release: pluginsdk.PoolRelease{State: pluginsdk.PoolReleased}}}, nil
 }
 
+type memoryTorrentPoolRefresh struct{ requested [][]string }
+
+func (r *memoryTorrentPoolRefresh) RefreshPool(_ context.Context, in pluginsdk.PoolRefreshInput) (pluginsdk.PoolRefreshResult, error) {
+	r.requested = append(r.requested, in.SiteAccountIDs)
+	return pluginsdk.PoolRefreshResult{Accepted: true, JobID: "job-1"}, nil
+}
+
 func newDownloadControlServer(control *memoryDownloadControl) hostServicesServer {
 	return *newHostServicesServer(&hostServicesState{
-		ctx:             context.Background(),
-		downloadTasks:   memoryDownloadTasks{},
-		downloadControl: control,
-		torrentPool:     memoryTorrentPool{},
+		ctx:                context.Background(),
+		downloadTasks:      memoryDownloadTasks{},
+		downloadControl:    control,
+		torrentPool:        memoryTorrentPool{},
+		torrentPoolRefresh: &memoryTorrentPoolRefresh{},
 	})
 }
 
@@ -129,15 +137,51 @@ func TestTorrentPoolPermissionIsSeparate(t *testing.T) {
 	}
 }
 
+// 读种子池和让宿主去抓一次是两条权限：前者只碰宿主已有的数据，后者会让宿主用用户的
+// 站点凭据外呼。只读权限顺带给出抓取能力，等于绕过了用户对外呼那一项的授权。
+func TestTorrentPoolRefreshPermissionIsSeparateFromRead(t *testing.T) {
+	refresh := &memoryTorrentPoolRefresh{}
+	server := *newHostServicesServer(&hostServicesState{
+		ctx:                context.Background(),
+		torrentPool:        memoryTorrentPool{},
+		torrentPoolRefresh: refresh,
+	})
+
+	var reply JSONReply
+	server.live().permissions.Host = []string{"site.torrents.pool.read"}
+	if err := server.RefreshTorrentPool(PoolRefreshRequest{}, &reply); err == nil {
+		t.Fatal("只读种子池权限不应顺带给出触发抓取的能力")
+	}
+	if len(refresh.requested) != 0 {
+		t.Fatalf("被拒绝的调用不应打到宿主能力: %v", refresh.requested)
+	}
+
+	server.live().permissions.Host = []string{"site.torrents.pool.refresh"}
+	if err := server.RefreshTorrentPool(PoolRefreshRequest{Input: pluginsdk.PoolRefreshInput{SiteAccountIDs: []string{"site-1"}}}, &reply); err != nil {
+		t.Fatalf("RefreshTorrentPool with permission: %v", err)
+	}
+	if len(refresh.requested) != 1 || len(refresh.requested[0]) != 1 || refresh.requested[0][0] != "site-1" {
+		t.Fatalf("站点范围未透传: %v", refresh.requested)
+	}
+	// 反过来也要成立：抓取权限不顺带给出读取权限。
+	if err := server.ListPoolTorrents(PoolTorrentQueryRequest{}, &reply); err == nil {
+		t.Fatal("只有 site.torrents.pool.refresh 时不应能读种子池")
+	}
+}
+
 // 宿主没注入能力时给的是「未提供」而不是「没授权」，排查时两种原因不能混。
 func TestDownloadCapabilitiesReportMissingHostServices(t *testing.T) {
 	server := *newHostServicesServer(&hostServicesState{ctx: context.Background()})
-	server.live().permissions.Host = []string{"downloads.tasks.read", "downloads.control", "site.torrents.pool.read"}
+	server.live().permissions.Host = []string{"downloads.tasks.read", "downloads.control",
+		"site.torrents.pool.read", "site.torrents.pool.refresh"}
 	var reply JSONReply
 	for name, call := range map[string]func() error{
 		"ListDownloadTasks": func() error { return server.ListDownloadTasks(DownloadTaskQueryRequest{}, &reply) },
 		"AddTorrent":        func() error { return server.AddTorrent(AddTorrentRequest{}, &reply) },
 		"ListPoolTorrents":  func() error { return server.ListPoolTorrents(PoolTorrentQueryRequest{}, &reply) },
+		"RefreshTorrentPool": func() error {
+			return server.RefreshTorrentPool(PoolRefreshRequest{}, &reply)
+		},
 	} {
 		if err := call(); err == nil {
 			t.Fatalf("%s 在宿主未注入能力时应当失败", name)

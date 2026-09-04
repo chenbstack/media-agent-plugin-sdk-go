@@ -649,9 +649,13 @@ type Instance struct {
 	// TorrentPool 只读地取用宿主抓下来的站点种子池，附带「宿主还要不要它」的
 	// 裁决；只在插件声明了 host 权限 "site.torrents.pool.read" 时由宿主注入。
 	TorrentPool SiteTorrentPool
-	Transfers   Transfers
-	Rules       Rules
-	Connections Connections
+	// TorrentPoolRefresh 请求宿主对指定站点抓一次最新种子；只在插件声明了 host
+	// 权限 "site.torrents.pool.refresh" 时由宿主注入。它会让宿主用用户的站点凭据
+	// 外呼，因此与只读的种子池分属两条权限。
+	TorrentPoolRefresh SiteTorrentPoolRefresh
+	Transfers          Transfers
+	Rules              Rules
+	Connections        Connections
 	// ConnectionCredentials reveals a provider-declared secret from an existing
 	// connection after a separate high-risk host permission check.
 	ConnectionCredentials ConnectionCredentials

@@ -41,6 +41,7 @@ type hostServicesState struct {
 	downloadTasks         pluginsdk.DownloadTasks
 	downloadControl       pluginsdk.DownloadControl
 	torrentPool           pluginsdk.SiteTorrentPool
+	torrentPoolRefresh    pluginsdk.SiteTorrentPoolRefresh
 	transfers             pluginsdk.Transfers
 	rules                 pluginsdk.Rules
 	connections           pluginsdk.Connections
@@ -353,6 +354,10 @@ type AddTorrentRequest struct {
 
 type PoolTorrentQueryRequest struct {
 	Query pluginsdk.PoolTorrentQuery
+}
+
+type PoolRefreshRequest struct {
+	Input pluginsdk.PoolRefreshInput
 }
 
 type TransferUpsertRequest struct {
@@ -1280,6 +1285,25 @@ func (s *hostServicesServer) ListPoolTorrents(req PoolTorrentQueryRequest, reply
 	return nil
 }
 
+func (s *hostServicesServer) RefreshTorrentPool(req PoolRefreshRequest, reply *JSONReply) error {
+	if s.live().torrentPoolRefresh == nil {
+		return fmt.Errorf("宿主未提供 SiteTorrentPoolRefresh")
+	}
+	if err := s.requireHostPermission("site.torrents.pool.refresh"); err != nil {
+		return err
+	}
+	result, err := s.live().torrentPoolRefresh.RefreshPool(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err != nil {
+		return err
+	}
+	*reply = out
+	return nil
+}
+
 func (s *hostServicesServer) UpsertTransfer(req TransferUpsertRequest, reply *JSONReply) error {
 	if s.live().transfers == nil {
 		return fmt.Errorf("宿主未提供 Transfers")
@@ -1919,6 +1943,18 @@ func (c *hostServicesClient) ListPoolTorrents(ctx context.Context, query plugins
 	var result []pluginsdk.PoolTorrent
 	if err := decodeJSON(reply.Data, &result); err != nil {
 		return nil, err
+	}
+	return result, nil
+}
+
+func (c *hostServicesClient) RefreshPool(ctx context.Context, in pluginsdk.PoolRefreshInput) (pluginsdk.PoolRefreshResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.RefreshTorrentPool", PoolRefreshRequest{Input: in}, &reply); err != nil {
+		return pluginsdk.PoolRefreshResult{}, err
+	}
+	var result pluginsdk.PoolRefreshResult
+	if err := decodeJSON(reply.Data, &result); err != nil {
+		return pluginsdk.PoolRefreshResult{}, err
 	}
 	return result, nil
 }
