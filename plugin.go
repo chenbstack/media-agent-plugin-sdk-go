@@ -702,7 +702,13 @@ type Instance struct {
 	// MediaMetadata 按语言读取宿主媒体库里的元数据；
 	// 只在插件声明了 host 权限 "media.metadata.read" 时由宿主注入。
 	MediaMetadata MediaMetadata
-	Runtime       *runtimesdk.Services
+	// MediaLibrary 只读列出宿主媒体库中可归档的视频文件；需要 host 权限
+	// "media.library.read"。
+	MediaLibrary MediaLibrary
+	// MediaArchive 执行宿主托管的复制校验与源文件清理；需要 host 权限
+	// "media.archive.write"。
+	MediaArchive MediaArchive
+	Runtime      *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。

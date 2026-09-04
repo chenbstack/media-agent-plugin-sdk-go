@@ -63,6 +63,8 @@ type hostServicesState struct {
 	siteRulePackKeys      pluginsdk.SiteRulePackKeys
 	textGeneration        pluginsdk.TextGeneration
 	mediaMetadata         pluginsdk.MediaMetadata
+	mediaLibrary          pluginsdk.MediaLibrary
+	mediaArchive          pluginsdk.MediaArchive
 }
 
 // hostServicesServer 是插件回调宿主的那一端。通道池会在每次租用前换掉 state，所以
@@ -803,6 +805,14 @@ type MediaMetadataDetailRequest struct {
 	Language string
 }
 
+type MediaLibraryListRequest struct {
+	Query pluginsdk.MediaLibraryQuery
+}
+
+type MediaArchiveRequest struct {
+	Input pluginsdk.MediaArchiveInput
+}
+
 // RendererAvailable 只报可用性，插件据此决定是否展示「浏览器仿真」开关。
 func (s *hostServicesServer) RendererAvailable(_ Empty, reply *JSONReply) error {
 	if s.live().renderer == nil {
@@ -996,6 +1006,42 @@ func (s *hostServicesServer) MediaMetadataDetail(req MediaMetadataDetailRequest,
 		return err
 	}
 	result, err := s.live().mediaMetadata.Detail(s.live().ctx, req.MediaID, req.Language)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) ListMediaLibrary(req MediaLibraryListRequest, reply *JSONReply) error {
+	if s.live().mediaLibrary == nil {
+		return fmt.Errorf("宿主未提供 MediaLibrary")
+	}
+	if err := s.requireHostPermission("media.library.read"); err != nil {
+		return err
+	}
+	result, err := s.live().mediaLibrary.List(s.live().ctx, req.Query)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) ArchiveMedia(req MediaArchiveRequest, reply *JSONReply) error {
+	if s.live().mediaArchive == nil {
+		return fmt.Errorf("宿主未提供 MediaArchive")
+	}
+	if err := s.requireHostPermission("media.archive.write"); err != nil {
+		return err
+	}
+	result, err := s.live().mediaArchive.Archive(s.live().ctx, req.Input)
 	if err != nil {
 		return err
 	}
@@ -1799,6 +1845,24 @@ func (c *hostServicesClient) Detail(_ context.Context, mediaID, language string)
 		return pluginsdk.MediaMetadataDetail{}, err
 	}
 	var result pluginsdk.MediaMetadataDetail
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) List(ctx context.Context, query pluginsdk.MediaLibraryQuery) ([]pluginsdk.MediaLibraryItem, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListMediaLibrary", MediaLibraryListRequest{Query: query}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.MediaLibraryItem
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) Archive(ctx context.Context, input pluginsdk.MediaArchiveInput) (pluginsdk.MediaArchiveResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ArchiveMedia", MediaArchiveRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.MediaArchiveResult{}, err
+	}
+	var result pluginsdk.MediaArchiveResult
 	return result, decodeJSON(reply.Data, &result)
 }
 

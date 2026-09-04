@@ -916,6 +916,8 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.SiteRulePackKeys = services
 	inst.TextGeneration = services
 	inst.MediaMetadata = services
+	inst.MediaLibrary = services
+	inst.MediaArchive = services
 	return inst, nil
 }
 
