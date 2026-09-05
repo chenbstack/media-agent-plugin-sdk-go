@@ -12,6 +12,7 @@ type MediaLibraryItem struct {
 	MediaType     string `json:"media_type"`
 	MediaCategory string `json:"media_category,omitempty"`
 	Title         string `json:"title"`
+	PosterURL     string `json:"poster_url,omitempty"`
 	Year          int    `json:"year,omitempty"`
 	Path          string `json:"path"`
 	StorageID     string `json:"storage_id"`
