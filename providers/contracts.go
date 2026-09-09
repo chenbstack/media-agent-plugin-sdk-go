@@ -140,7 +140,8 @@ type PlaybackURLResult struct {
 }
 
 // PlaybackURLProvider 是云盘等存储可选实现的播放 URL 解析能力。
-// 宿主播放网关调用它并把 URL 作为 302 Location 返回。
+// 宿主播放网关默认消费 Headers 代理视频流；调用方显式请求 redirect=1 时，
+// 宿主才把 URL 作为经过校验的 302 Location 返回。
 type PlaybackURLProvider interface {
 	ResolvePlaybackURL(ctx context.Context, input PlaybackURLInput) (PlaybackURLResult, error)
 }
