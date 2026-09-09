@@ -14,6 +14,15 @@ type PlaybackCacheWarmInput struct {
 	SizeBytes       int64  `json:"size_bytes,omitempty"`
 	HeadBytes       int64  `json:"head_bytes,omitempty"`
 	TailBytes       int64  `json:"tail_bytes,omitempty"`
+	// CleanupEnabled controls whether the host may remove expired or oldest
+	// entries to maintain MaxBytes. False means existing entries are kept and
+	// a new warm-up is skipped when the requested capacity is unavailable.
+	CleanupEnabled bool `json:"cleanup_enabled,omitempty"`
+	// TTLDays is the retention period when CleanupEnabled is true. Zero means
+	// no time-based expiry; old inputs without these fields remain permanent.
+	TTLDays int64 `json:"ttl_days,omitempty"`
+	// MaxBytes is the requested total cache capacity. Zero uses the host default.
+	MaxBytes int64 `json:"max_bytes,omitempty"`
 }
 
 // PlaybackCacheWarmResult reports what the host actually stored. A failed or
