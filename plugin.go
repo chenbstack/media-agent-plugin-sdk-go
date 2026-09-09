@@ -677,6 +677,9 @@ type Instance struct {
 	// Playback 通过宿主已配置的存储 Provider 解析实时播放直链；只在插件声明了
 	// host 权限 "media.playback.resolve" 时由宿主注入。
 	Playback MediaPlayback
+	// PlaybackCache 让插件请求宿主预热媒体播放所需的头尾字节；只在插件声明了
+	// host 权限 "media.playback.cache.write" 时由宿主注入。
+	PlaybackCache MediaPlaybackCache
 	// Workspace 是宿主分配给本插件的私有工作目录，放解压产物、下载缓存这类只有插件
 	// 自己关心的文件；只在插件声明了 host 权限 "workspace.local" 时由宿主注入。
 	// 用户的媒体文件不在里面，也不该往里面放——那是 Sidecars / Mirrors 的事。

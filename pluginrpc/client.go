@@ -497,7 +497,7 @@ func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver
 		inst.Transfers != nil ||
 		inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil || inst.Storages != nil ||
 		inst.Schedules != nil || inst.Settings != nil || inst.Entitlements != nil || inst.PluginServices != nil ||
-		inst.Sidecars != nil || inst.SidecarReader != nil || inst.Mirrors != nil || inst.Playback != nil || inst.Renderer != nil ||
+		inst.Sidecars != nil || inst.SidecarReader != nil || inst.Mirrors != nil || inst.Playback != nil || inst.PlaybackCache != nil || inst.Renderer != nil ||
 		inst.Cloud != nil || inst.SiteRules != nil || inst.SiteRulePacks != nil || inst.SiteRulePackKeys != nil ||
 		inst.TextGeneration != nil || inst.MediaMetadata != nil || inst.EntitlementProof != nil ||
 		inst.MediaLibrary != nil || inst.MediaArchive != nil
@@ -552,6 +552,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			sidecarReader:         inst.SidecarReader,
 			mirrors:               inst.Mirrors,
 			playback:              inst.Playback,
+			playbackCache:         inst.PlaybackCache,
 			renderer:              inst.Renderer,
 			cloud:                 inst.Cloud,
 			siteRules:             inst.SiteRules,

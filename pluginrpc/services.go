@@ -56,6 +56,7 @@ type hostServicesState struct {
 	sidecarReader         pluginsdk.MediaSidecarReader
 	mirrors               pluginsdk.MediaMirrors
 	playback              pluginsdk.MediaPlayback
+	playbackCache         pluginsdk.MediaPlaybackCache
 	renderer              pluginsdk.PageRenderer
 	cloud                 pluginsdk.CloudIdentity
 	siteRules             pluginsdk.SiteRuleFiles
@@ -759,6 +760,10 @@ type PlaybackResolveRequest struct {
 	Input pluginsdk.PlaybackResolveInput
 }
 
+type PlaybackCacheWarmRequest struct {
+	Input pluginsdk.PlaybackCacheWarmInput
+}
+
 func (s *hostServicesServer) ResolvePlaybackURL(req PlaybackResolveRequest, reply *JSONReply) error {
 	if s.live().playback == nil {
 		return fmt.Errorf("宿主未提供 MediaPlayback")
@@ -767,6 +772,24 @@ func (s *hostServicesServer) ResolvePlaybackURL(req PlaybackResolveRequest, repl
 		return err
 	}
 	result, err := s.live().playback.ResolvePlaybackURL(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) WarmPlaybackCache(req PlaybackCacheWarmRequest, reply *JSONReply) error {
+	if s.live().playbackCache == nil {
+		return fmt.Errorf("宿主未提供 MediaPlaybackCache")
+	}
+	if err := s.requireHostPermission("media.playback.cache.write"); err != nil {
+		return err
+	}
+	result, err := s.live().playbackCache.Warm(s.live().ctx, req.Input)
 	if err != nil {
 		return err
 	}
@@ -1739,6 +1762,15 @@ func (c *hostServicesClient) ResolvePlaybackURL(_ context.Context, input plugins
 		return pluginsdk.PlaybackResolveResult{}, err
 	}
 	var result pluginsdk.PlaybackResolveResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) Warm(_ context.Context, input pluginsdk.PlaybackCacheWarmInput) (pluginsdk.PlaybackCacheWarmResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.WarmPlaybackCache", PlaybackCacheWarmRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.PlaybackCacheWarmResult{}, err
+	}
+	var result pluginsdk.PlaybackCacheWarmResult
 	return result, decodeJSON(reply.Data, &result)
 }
 

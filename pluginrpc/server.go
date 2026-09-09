@@ -909,6 +909,7 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.SidecarReader = services
 	inst.Mirrors = services
 	inst.Playback = services
+	inst.PlaybackCache = services
 	inst.Renderer = services
 	inst.Cloud = services
 	inst.SiteRules = services
