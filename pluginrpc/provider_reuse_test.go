@@ -87,6 +87,60 @@ func TestMetadataProviderReusedAcrossCalls(t *testing.T) {
 	}
 }
 
+type countingStorage struct{ resolves int }
+
+func (p *countingStorage) Kind() string { return "counting" }
+
+func (p *countingStorage) TestConnection(context.Context) error { return nil }
+
+func (p *countingStorage) Info(context.Context) (providers.StorageInfo, error) {
+	return providers.StorageInfo{}, nil
+}
+
+func (p *countingStorage) EnsureMounted(context.Context) error { return nil }
+
+func (p *countingStorage) Unmount(context.Context) error { return nil }
+
+func (p *countingStorage) ResolvePlaybackURL(context.Context, providers.PlaybackURLInput) (providers.PlaybackURLResult, error) {
+	p.resolves++
+	return providers.PlaybackURLResult{URL: "https://cdn.example/video"}, nil
+}
+
+// Storage used a separate legacy construction path and therefore ignored the
+// ReuseProviders declaration. Playback exposes the bug clearly: every Range
+// probe rebuilt the storage provider and discarded its path cache.
+func TestStorageProviderReusedAcrossPlaybackCalls(t *testing.T) {
+	built := 0
+	server := &rpcServer{plugin: pluginsdk.Plugin{
+		Manifest:       pluginsdk.Manifest{ID: "counting-storage"},
+		ReuseProviders: true,
+		NewStorage: func(context.Context, pluginsdk.Instance, pluginsdk.SecretResolver) (providers.StorageProvider, error) {
+			built++
+			return &countingStorage{}, nil
+		},
+	}}
+	payload := InstancePayload{ID: "storage-1", ConfigHash: "hash", ConfigJSON: []byte(`{}`)}
+	for range 3 {
+		var reply JSONReply
+		if err := server.StorageResolvePlaybackURL(StoragePlaybackURLRequest{
+			Instance: payload,
+			Input:    providers.PlaybackURLInput{Path: "/movie.mkv"},
+		}, &reply); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if built != 1 {
+		t.Fatalf("three playback resolves should build one storage provider, got %d", built)
+	}
+	pooled, ok := server.providers.take(providerPoolKey("storage", payload), time.Now())
+	if !ok {
+		t.Fatal("storage provider should remain in the reuse pool")
+	}
+	if resolves := pooled.provider.(*countingStorage).resolves; resolves != 3 {
+		t.Fatalf("storage provider state should survive three calls, got %d", resolves)
+	}
+}
+
 // 没声明 ReuseProviders 的插件行为必须一个字不变：每次现造，永不入池。
 func TestMetadataProviderRebuiltWithoutDeclaration(t *testing.T) {
 	built := 0

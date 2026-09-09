@@ -942,16 +942,7 @@ func (s *rpcServer) storage(payload InstancePayload) (providers.StorageProvider,
 	if s.plugin.NewStorage == nil {
 		return nil, nil, fmt.Errorf("插件未实现 StorageProvider")
 	}
-	inst, secrets, closeFn, err := s.instance(payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := s.plugin.NewStorage(context.Background(), inst, secrets)
-	if err != nil {
-		closeFn()
-		return nil, nil, err
-	}
-	return provider, closeFn, nil
+	return leaseProvider(s, "storage", payload, s.plugin.NewStorage)
 }
 
 func (s *rpcServer) renderer(payload InstancePayload) (providers.RendererProvider, func(), error) {
