@@ -21,6 +21,18 @@ type ActionResult struct {
 	Data    map[string]any `json:"data,omitempty"`
 }
 
+// HealthCheckActionID 是插件回报健康检查结果的约定动作 ID。
+//
+// 不属于下载器、媒体服务器、元数据源、站点（这些走 providers.HealthReporter）的插件，
+// 在 manifest 里同时声明 health_checks 和一个 ID 为 health.check 的动作，宿主会定期
+// 或在用户点「立即检查」时调用它。动作返回的 Data 形如：
+//
+//	{"checks": [{"id": "login", "status": "ok|warning|error", "message": "", "latency_ms": 12}]}
+//
+// 各项的 id 必须出现在 manifest.health_checks 里，规则与 providers.HealthReporter 一致。
+// 动作按插件级配置运行，并沿用普通动作的权限与授权模型。
+const HealthCheckActionID = "health.check"
+
 type ActionHandler interface {
 	RunAction(ctx context.Context, actionID string, input map[string]any) (ActionResult, error)
 }

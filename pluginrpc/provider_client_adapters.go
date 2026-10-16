@@ -160,7 +160,7 @@ func (p *downloaderProvider) Add(ctx context.Context, request providers.AddTorre
 		}
 		return decodeJSON(reply.Data, &out)
 	})
-	return out, err
+	return out, mapHealthChecksError(err)
 }
 
 func (p *downloaderProvider) List(ctx context.Context) ([]providers.TorrentTask, error) {
@@ -575,7 +575,7 @@ func (p *subtitleSourceProvider) Search(ctx context.Context, request providers.S
 		}
 		return decodeJSON(reply.Data, &out)
 	})
-	return out, err
+	return out, mapHealthChecksError(err)
 }
 func (p *subtitleSourceProvider) Download(ctx context.Context, result providers.SubtitleResult) ([]byte, error) {
 	var out []byte
@@ -586,7 +586,7 @@ func (p *subtitleSourceProvider) Download(ctx context.Context, result providers.
 		}
 		return decodeJSON(reply.Data, &out)
 	})
-	return out, err
+	return out, mapHealthChecksError(err)
 }
 func (p *subtitleSourceProvider) withPayload(ctx context.Context, operation string, fn func(*Client, InstancePayload) error) error {
 	return p.session.withClient(ctx, operation, func(c *Client) error {
@@ -856,4 +856,71 @@ func (p *siteProvider) bytes(ctx context.Context, operation, method, url string)
 		return nil
 	})
 	return data, err
+}
+
+var _ providers.HealthReporter = (*downloaderProvider)(nil)
+
+func (p *downloaderProvider) HealthChecks(ctx context.Context) ([]providers.HealthCheckResult, error) {
+	var out []providers.HealthCheckResult
+	err := p.withPayload(ctx, "downloader.test", func(c *Client, instance InstancePayload) error {
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.DownloaderHealth", instance, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, mapHealthChecksError(err)
+}
+
+var _ providers.HealthReporter = (*mediaServerProvider)(nil)
+
+func (p *mediaServerProvider) HealthChecks(ctx context.Context) ([]providers.HealthCheckResult, error) {
+	var out []providers.HealthCheckResult
+	err := p.withPayload(ctx, "media_server.test", func(c *Client, instance InstancePayload) error {
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.MediaServerHealth", instance, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, mapHealthChecksError(err)
+}
+
+var _ providers.HealthReporter = (*metadataProvider)(nil)
+
+func (p *metadataProvider) HealthChecks(ctx context.Context) ([]providers.HealthCheckResult, error) {
+	var out []providers.HealthCheckResult
+	err := p.withPayload(ctx, "metadata.test", func(c *Client, instance InstancePayload) error {
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.MetadataHealth", instance, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, mapHealthChecksError(err)
+}
+
+var _ providers.HealthReporter = (*siteProvider)(nil)
+
+func (p *siteProvider) HealthChecks(ctx context.Context) ([]providers.HealthCheckResult, error) {
+	var out []providers.HealthCheckResult
+	err := p.withPayload(ctx, "site.test", func(c *Client, instance InstancePayload) error {
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.SiteHealth", instance, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, mapHealthChecksError(err)
+}
+
+// mapHealthChecksError 把「老插件进程没有这个 RPC」和「Provider 没实现接口」统一成哨兵错误。
+func mapHealthChecksError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isUnknownRPCMethod(err) || strings.Contains(err.Error(), providers.ErrHealthChecksUnsupported.Error()) {
+		return providers.ErrHealthChecksUnsupported
+	}
+	return err
 }

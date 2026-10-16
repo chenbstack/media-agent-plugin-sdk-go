@@ -868,3 +868,29 @@ type RendererProvider interface {
 	TestConnection(ctx context.Context) error
 	Render(ctx context.Context, req RenderRequest) (RenderResult, error)
 }
+
+// 健康检查分项的结果状态。
+const (
+	HealthStatusOK      = "ok"
+	HealthStatusWarning = "warning"
+	HealthStatusError   = "error"
+)
+
+// ErrHealthChecksUnsupported 表示 Provider 没有（或旧插件进程不认识）分项健康检查，
+// 宿主据此退回 TestConnection。
+var ErrHealthChecksUnsupported = errors.New("插件未提供分项健康检查")
+
+// HealthCheckResult 是插件对 manifest.health_checks 中某一项的回报。
+type HealthCheckResult struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	Message   string `json:"message,omitempty"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+}
+
+// HealthReporter 是可选接口：下载器、媒体服务器、元数据源、站点 Provider 实现它后，
+// 宿主在 manifest 声明了 health_checks 时用它代替 TestConnection，按分项取回结果。
+// 返回 error 表示整次检查失败（等同 TestConnection 失败）；单项失败应放进结果里。
+type HealthReporter interface {
+	HealthChecks(ctx context.Context) ([]HealthCheckResult, error)
+}

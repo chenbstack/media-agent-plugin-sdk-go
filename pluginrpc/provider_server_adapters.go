@@ -653,3 +653,59 @@ func (s *rpcServer) SiteDiagnose(req SiteDiagnoseRequest, reply *JSONReply) erro
 	}
 	return setJSONReply(reply, diagnoser.Diagnose(context.Background(), req.Input), nil)
 }
+
+func (s *rpcServer) DownloaderHealth(req InstancePayload, reply *JSONReply) error {
+	p, closeFn, err := s.downloader(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	reporter, ok := p.(providers.HealthReporter)
+	if !ok {
+		return providers.ErrHealthChecksUnsupported
+	}
+	value, callErr := reporter.HealthChecks(context.Background())
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) MediaServerHealth(req InstancePayload, reply *JSONReply) error {
+	p, closeFn, err := s.mediaServer(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	reporter, ok := p.(providers.HealthReporter)
+	if !ok {
+		return providers.ErrHealthChecksUnsupported
+	}
+	value, callErr := reporter.HealthChecks(context.Background())
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) MetadataHealth(req InstancePayload, reply *JSONReply) error {
+	p, closeFn, err := s.metadata(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	reporter, ok := p.(providers.HealthReporter)
+	if !ok {
+		return providers.ErrHealthChecksUnsupported
+	}
+	value, callErr := reporter.HealthChecks(context.Background())
+	return setJSONReply(reply, value, callErr)
+}
+
+func (s *rpcServer) SiteHealth(req InstancePayload, reply *JSONReply) error {
+	p, closeFn, err := s.site(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	reporter, ok := p.(providers.HealthReporter)
+	if !ok {
+		return providers.ErrHealthChecksUnsupported
+	}
+	value, callErr := reporter.HealthChecks(context.Background())
+	return setJSONReply(reply, value, callErr)
+}

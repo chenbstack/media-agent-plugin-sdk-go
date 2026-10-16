@@ -60,11 +60,29 @@ type Manifest struct {
 	ScheduledTasks     []ScheduledTaskDefinition `yaml:"scheduled_tasks,omitempty" json:"scheduled_tasks,omitempty"`
 	HTTPServices       []HTTPServiceDefinition   `yaml:"http_services,omitempty" json:"http_services,omitempty"`
 	Artifacts          []ArtifactDefinition      `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
+	HealthChecks       []HealthCheckDefinition   `yaml:"health_checks,omitempty" json:"health_checks,omitempty"`
 	Permissions        Permissions               `yaml:"permissions" json:"permissions"`
 	Resources          Resources                 `yaml:"resources" json:"resources"`
 	Install            *InstallInfo              `yaml:"install,omitempty" json:"install,omitempty"`
 	ModelBackend       string                    `yaml:"model_backend,omitempty" json:"model_backend,omitempty"`
 	ModelUI            *ModelUI                  `yaml:"model_ui,omitempty" json:"model_ui,omitempty"`
+}
+
+// 健康检查分项对整体连接状态的影响。
+const (
+	HealthImpactError   = "error"   // 分项失败即整个连接标为异常（默认）
+	HealthImpactWarning = "warning" // 分项失败只给警告，连接仍视为可用
+)
+
+// HealthCheckDefinition 声明连接健康检查里的一个分项。声明让宿主在首次检查之前就知道
+// 有哪些项并能占位展示；运行时由 providers.HealthReporter 按 ID 回报各项结果。
+// 声明里没有的 ID 宿主会忽略，声明了却没回报的项显示为「未检查」。
+type HealthCheckDefinition struct {
+	ID          string `yaml:"id" json:"id"`
+	Label       string `yaml:"label" json:"label"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// Impact 为空按 error 处理。
+	Impact string `yaml:"impact,omitempty" json:"impact,omitempty"`
 }
 
 // AgentExtension declares bounded business tools that the host may expose to
@@ -977,6 +995,9 @@ func (p Plugin) Validate() error {
 			return fmt.Errorf("插件 %s: event subscription %s 必须包含正数 version", m.ID, sub.Type)
 		}
 	}
+	if err := m.validateHealthChecks(); err != nil {
+		return err
+	}
 	seenArtifacts := map[string]struct{}{}
 	for _, artifact := range m.Artifacts {
 		if !manifestIdentifier.MatchString(artifact.ID) {
@@ -1137,6 +1158,33 @@ func (p Plugin) Validate() error {
 }
 
 func (p Plugin) validate() error { return p.Validate() }
+
+const maxHealthChecks = 8
+
+func (m Manifest) validateHealthChecks() error {
+	if len(m.HealthChecks) > maxHealthChecks {
+		return fmt.Errorf("插件 %s: health_checks 最多 %d 项", m.ID, maxHealthChecks)
+	}
+	seen := map[string]struct{}{}
+	for _, check := range m.HealthChecks {
+		if !manifestIdentifier.MatchString(check.ID) {
+			return fmt.Errorf("插件 %s: health_checks id %q 格式无效", m.ID, check.ID)
+		}
+		if _, exists := seen[check.ID]; exists {
+			return fmt.Errorf("插件 %s: health_checks id 重复 %q", m.ID, check.ID)
+		}
+		seen[check.ID] = struct{}{}
+		if strings.TrimSpace(check.Label) == "" {
+			return fmt.Errorf("插件 %s: health_checks %s 必须有 label", m.ID, check.ID)
+		}
+		switch check.Impact {
+		case "", HealthImpactError, HealthImpactWarning:
+		default:
+			return fmt.Errorf("插件 %s: health_checks %s 的 impact %q 不受支持", m.ID, check.ID, check.Impact)
+		}
+	}
+	return nil
+}
 
 func (m Manifest) validateModelUI(capabilities map[string]struct{}) error {
 	if m.ModelUI == nil {
