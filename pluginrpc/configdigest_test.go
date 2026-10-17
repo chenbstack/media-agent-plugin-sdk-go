@@ -146,3 +146,31 @@ func (c *Client) hasCachedConfig(instanceID string) bool {
 	_, ok := c.configs.entries[instanceID]
 	return ok
 }
+
+// 参数本身就是 InstancePayload 的调用（如 CookieSourceTest）和 Source/Target 形式的请求，
+// 摘要未命中后也必须带完整配置重试，不能直接把「配置摘要未命中」抛给调用方。
+func TestWithFullConfigRestoresBareAndNestedPayloads(t *testing.T) {
+	client := &Client{}
+	full, hash := client.configs.prepare("global", []byte(`{"a":1}`))
+	if full == nil || hash == "" {
+		t.Fatalf("prepare 应返回完整配置与摘要: %q %q", full, hash)
+	}
+	digestOnly := InstancePayload{ID: "global", ConfigHash: hash}
+
+	got, ok := client.withFullConfig(digestOnly)
+	if !ok {
+		t.Fatal("直接以 InstancePayload 为参数时应能补全配置")
+	}
+	if payload := got.(InstancePayload); string(payload.ConfigJSON) != `{"a":1}` {
+		t.Fatalf("ConfigJSON = %q", payload.ConfigJSON)
+	}
+
+	nested, ok := client.withFullConfig(RendererRenderRequest{Instance: digestOnly})
+	if !ok || string(nested.(RendererRenderRequest).Instance.ConfigJSON) != `{"a":1}` {
+		t.Fatalf("Instance 字段补全失败: ok=%v %#v", ok, nested)
+	}
+
+	if _, ok := client.withFullConfig(InstancePayload{ID: "global", ConfigHash: "unknown"}); ok {
+		t.Fatal("本地没有该摘要时不应重试")
+	}
+}

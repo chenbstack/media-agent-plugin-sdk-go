@@ -429,31 +429,56 @@ func (c *Client) invoke(ctx context.Context, serviceMethod string, args any, rep
 
 // withFullConfig 把完整配置塞回请求，供配置摘要未命中后重试。
 //
-// 请求结构体有几十个，但携带实例的字段一律叫 Instance；按名字找一次，比给每个结构体
-// 补一遍接口方法便宜得多，而且这段只在未命中这条罕见路径上跑。
+// 携带实例的位置有三种：请求结构体里的 Instance 字段、转存请求的 Source/Target，
+// 以及少数调用（CookieSourceTest、AssessOnboarding、Storage* 等）直接拿 InstancePayload
+// 当参数。统一按类型找，凡是 InstancePayload 都补回完整配置；只在未命中这条罕见路径上跑。
+// 只要有一处没补上就不重试，免得带着残缺配置白发一趟。
 func (c *Client) withFullConfig(args any) (any, bool) {
+	payloadType := reflect.TypeOf(InstancePayload{})
 	value := reflect.ValueOf(args)
-	if value.Kind() != reflect.Struct {
-		return nil, false
+	switch {
+	case value.Kind() == reflect.Struct && value.Type() == payloadType:
+		payload := args.(InstancePayload)
+		if !c.restoreConfig(&payload) {
+			return nil, false
+		}
+		return payload, true
+	case value.Kind() == reflect.Struct:
+		copied := reflect.New(value.Type()).Elem()
+		copied.Set(value)
+		restored := false
+		for i := 0; i < copied.NumField(); i++ {
+			field := copied.Field(i)
+			if field.Type() != payloadType || !field.CanSet() {
+				continue
+			}
+			payload := field.Interface().(InstancePayload)
+			if payload.ConfigHash == "" || len(payload.ConfigJSON) > 0 {
+				continue // 没走摘要，本来就带着完整配置
+			}
+			if !c.restoreConfig(&payload) {
+				return nil, false
+			}
+			field.Set(reflect.ValueOf(payload))
+			restored = true
+		}
+		if !restored {
+			return nil, false
+		}
+		return copied.Interface(), true
 	}
-	copied := reflect.New(value.Type()).Elem()
-	copied.Set(value)
-	field := copied.FieldByName("Instance")
-	if !field.IsValid() || field.Type() != reflect.TypeOf(InstancePayload{}) || !field.CanSet() {
-		return nil, false
-	}
-	payload, ok := field.Interface().(InstancePayload)
-	if !ok {
-		return nil, false
-	}
-	// 保留本地记录：并发请求可能同时命中同一个失效摘要，必须都能拿到完整配置重试。
+	return nil, false
+}
+
+// restoreConfig 按摘要从本地记录取回完整配置。保留本地记录：并发请求可能同时命中
+// 同一个失效摘要，必须都能拿到完整配置重试。
+func (c *Client) restoreConfig(payload *InstancePayload) bool {
 	configJSON := c.configs.fullConfig(payload.ID, payload.ConfigHash)
 	if configJSON == nil {
-		return nil, false
+		return false
 	}
 	payload.ConfigJSON = configJSON
-	field.Set(reflect.ValueOf(payload))
-	return copied.Interface(), true
+	return true
 }
 
 // featureSet 问一次插件支持哪些协议优化，结果记在 Client 上。
