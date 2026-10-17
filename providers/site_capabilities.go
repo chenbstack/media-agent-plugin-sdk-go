@@ -35,6 +35,7 @@ const (
 	CapabilitySiteMediaInfoRead = "site.mediainfo.read"
 	CapabilitySiteSubtitlesRead = "site.subtitles.read"
 	CapabilitySiteDiagnose      = "site.diagnose"
+	// CapabilitySiteSampleCollect 见 site_sample.go。
 	// CapabilitySiteSupportResolve 是插件级能力：判定站点地址是否被支持。
 	CapabilitySiteSupportResolve = "site.support.resolve"
 )
@@ -51,6 +52,8 @@ type SiteCapabilities struct {
 	SubtitlesRead bool `json:"subtitles_read,omitempty"`
 	// Diagnose：能对站点规则执行只读诊断。
 	Diagnose bool `json:"diagnose,omitempty"`
+	// SampleCollect：能采集无专用规则站点的页面样本，供宿主脱敏后提交 Cloud 制作规则。
+	SampleCollect bool `json:"sample_collect,omitempty"`
 	// IMDBSearch：搜索支持按 IMDb ID 精确匹配。
 	// 这是纯查询结果而非独立方法，并入能力集避免为一个布尔值单开一次 RPC。
 	IMDBSearch bool `json:"imdb_search,omitempty"`
@@ -77,6 +80,7 @@ func CapabilitiesOfSite(provider SiteProvider) SiteCapabilities {
 	_, caps.MediaInfoRead = provider.(TorrentMediaInfoProvider)
 	_, caps.SubtitlesRead = provider.(SiteSubtitleProvider)
 	_, caps.Diagnose = provider.(SiteDiagnoser)
+	_, caps.SampleCollect = provider.(SiteSampleCollector)
 	if imdb, ok := provider.(interface{ SupportsIMDBSearch() bool }); ok {
 		caps.IMDBSearch = imdb.SupportsIMDBSearch()
 	}

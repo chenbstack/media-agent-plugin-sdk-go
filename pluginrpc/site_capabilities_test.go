@@ -45,6 +45,17 @@ func (s *capableSite) Diagnose(_ context.Context, input providers.DiagnosticInpu
 	return providers.DiagnosticReport{Status: providers.DiagnosticOK, RuleID: "demo"}
 }
 
+func (s *capableSite) CollectSiteSample(context.Context) (providers.SiteSample, error) {
+	return providers.SiteSample{
+		SiteType: providers.SampleSiteHTML, Framework: "nexusphp",
+		Items: []providers.SampleItem{{
+			Capability: providers.SampleCapProfile, Required: true, Status: providers.SampleStatusOK,
+			Page: &providers.SamplePage{URL: "https://site.example/index.php", Status: 200, HTML: []byte("<html>ok</html>")},
+		}},
+		Known: providers.SampleKnownValues{Username: "alice", UserID: "7"},
+	}, nil
+}
+
 func (s *capableSite) SupportsIMDBSearch() bool { return true }
 
 func siteClientFor(t *testing.T, provider providers.SiteProvider) providers.SiteProvider {
@@ -68,7 +79,7 @@ func TestSiteCapabilitiesRoundTrip(t *testing.T) {
 	caps := providers.CapabilitiesOfSite(site)
 	want := providers.SiteCapabilities{
 		TorrentFetch: true, MediaInfoRead: true, SubtitlesRead: true,
-		Diagnose: true, IMDBSearch: true,
+		Diagnose: true, SampleCollect: true, IMDBSearch: true,
 	}
 	if caps != want {
 		t.Fatalf("capabilities = %+v, want %+v", caps, want)
@@ -108,6 +119,14 @@ func TestSiteCapabilitiesRoundTrip(t *testing.T) {
 	if backing.diagnosed.Keyword != "沙丘" {
 		t.Fatalf("诊断输入未透传: %+v", backing.diagnosed)
 	}
+
+	sample, err := site.(providers.SiteSampleCollector).CollectSiteSample(ctx)
+	if err != nil || sample.Framework != "nexusphp" || len(sample.Items) != 1 {
+		t.Fatalf("CollectSiteSample = %+v, %v", sample, err)
+	}
+	if page := sample.Items[0].Page; page == nil || string(page.HTML) != "<html>ok</html>" || sample.Known.Username != "alice" {
+		t.Fatalf("样本内容未完整透传: %+v", sample)
+	}
 }
 
 // 站点插件不具备可选能力时，能力集必须如实为空，且调用返回显式的
@@ -131,6 +150,9 @@ func TestSiteWithoutCapabilitiesReportsAndFailsExplicitly(t *testing.T) {
 	}
 	if _, err := site.(providers.SiteSubtitleProvider).DownloadSubtitle(ctx, "https://site.example/x"); !isUnsupported(err) {
 		t.Fatalf("DownloadSubtitle err = %v, want ErrCapabilityUnsupported", err)
+	}
+	if _, err := site.(providers.SiteSampleCollector).CollectSiteSample(ctx); !isUnsupported(err) {
+		t.Fatalf("CollectSiteSample err = %v, want ErrCapabilityUnsupported", err)
 	}
 	report := site.(providers.SiteDiagnoser).Diagnose(ctx, providers.DiagnosticInput{})
 	if report.Status != providers.DiagnosticError {

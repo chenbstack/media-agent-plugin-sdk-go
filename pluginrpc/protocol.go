@@ -1632,6 +1632,11 @@ type SiteDiagnoseRequest struct {
 	Input    providers.DiagnosticInput
 }
 
+// SiteSampleRequest 是站点样本采集的调用参数。
+type SiteSampleRequest struct {
+	Instance InstancePayload
+}
+
 // BytesReply 承载原始字节（种子文件、字幕文件）。
 // 不复用 JSONReply 是因为 JSON 会把字节流编成 base64，白白膨胀三分之一。
 type BytesReply struct {

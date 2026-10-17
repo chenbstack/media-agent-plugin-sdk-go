@@ -654,6 +654,20 @@ func (s *rpcServer) SiteDiagnose(req SiteDiagnoseRequest, reply *JSONReply) erro
 	return setJSONReply(reply, diagnoser.Diagnose(context.Background(), req.Input), nil)
 }
 
+func (s *rpcServer) SiteCollectSample(req SiteSampleRequest, reply *JSONReply) error {
+	p, closeFn, err := s.site(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	collector, ok := p.(providers.SiteSampleCollector)
+	if !ok {
+		return providers.UnsupportedCapabilityError(providers.CapabilitySiteSampleCollect)
+	}
+	value, callErr := collector.CollectSiteSample(context.Background())
+	return setJSONReply(reply, value, callErr)
+}
+
 func (s *rpcServer) DownloaderHealth(req InstancePayload, reply *JSONReply) error {
 	p, closeFn, err := s.downloader(req)
 	if err != nil {

@@ -784,6 +784,7 @@ var (
 	_ providers.TorrentMediaInfoProvider = (*siteProvider)(nil)
 	_ providers.SiteSubtitleProvider     = (*siteProvider)(nil)
 	_ providers.SiteDiagnoser            = (*siteProvider)(nil)
+	_ providers.SiteSampleCollector      = (*siteProvider)(nil)
 )
 
 func (p *siteProvider) SiteCapabilities() providers.SiteCapabilities {
@@ -822,6 +823,14 @@ func (p *siteProvider) SubtitleAttachments(ctx context.Context, detailURL string
 
 func (p *siteProvider) DownloadSubtitle(ctx context.Context, downloadURL string) ([]byte, error) {
 	return p.bytes(ctx, "site.subtitles.read", "Plugin.SiteDownloadSubtitle", downloadURL)
+}
+
+func (p *siteProvider) CollectSiteSample(ctx context.Context) (providers.SiteSample, error) {
+	var out providers.SiteSample
+	err := p.json(ctx, "site.sample.collect", "Plugin.SiteCollectSample", func(instance InstancePayload) any {
+		return SiteSampleRequest{Instance: instance}
+	}, &out)
+	return out, err
 }
 
 // Diagnose 的签名不返回 error（诊断把失败写进报告里），跨进程调用失败只能就地
