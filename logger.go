@@ -67,6 +67,9 @@ func ErrAttrs(err error) []any {
 	if len(chain) > 1 {
 		attrs = append(attrs, "error_chain", chain)
 	}
+	if stack := ErrStack(err); stack != "" {
+		attrs = append(attrs, "stack", stack)
+	}
 	var coded interface{ Code() string }
 	if errors.As(err, &coded) {
 		if code := strings.TrimSpace(coded.Code()); code != "" {
@@ -83,7 +86,11 @@ const maxStackFrames = 16
 func CompactStack() string {
 	pcs := make([]uintptr, 48)
 	n := runtime.Callers(2, pcs)
-	frames := runtime.CallersFrames(pcs[:n])
+	return compactFrames(pcs[:n])
+}
+
+func compactFrames(pcs []uintptr) string {
+	frames := runtime.CallersFrames(pcs)
 	var lines []string
 	for {
 		frame, more := frames.Next()
@@ -133,4 +140,34 @@ func shortFile(file string) string {
 		return file[i+1:]
 	}
 	return file
+}
+
+type stackError struct {
+	err error
+	pcs []uintptr
+}
+
+func (e *stackError) Error() string { return e.err.Error() }
+func (e *stackError) Unwrap() error { return e.err }
+
+// WithStack 在错误产生处捕获调用栈：ErrAttrs 之后会优先用它作为 stack，指向错误从哪来，
+// 而不是日志在哪打。err 为 nil 或错误链里已有栈时原样返回，所以可以在每一层放心调用，
+// 最内层（最先调用）的那份栈会保留。Error() 与 Unwrap 行为不变。
+func WithStack(err error) error {
+	var existing *stackError
+	if err == nil || errors.As(err, &existing) {
+		return err
+	}
+	pcs := make([]uintptr, 32)
+	n := runtime.Callers(2, pcs)
+	return &stackError{err: err, pcs: pcs[:n]}
+}
+
+// ErrStack 返回错误链里 WithStack 捕获的精简调用栈，没有则返回空串。
+func ErrStack(err error) string {
+	var se *stackError
+	if errors.As(err, &se) {
+		return compactFrames(se.pcs)
+	}
+	return ""
 }

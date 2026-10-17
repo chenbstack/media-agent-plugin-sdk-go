@@ -40,3 +40,24 @@ func TestCompactStackKeepsOnlyPluginFrames(t *testing.T) {
 		t.Fatalf("stack contains non-plugin frames: %q", stack)
 	}
 }
+
+func originOfError() error { return WithStack(errors.New("boom")) }
+
+// SDK 自己的帧会被精简栈过滤，所以这里直接检查捕获的 pc，而不是 ErrStack 的文本。
+func TestWithStackCapturesOriginOnceAndKeepsMessage(t *testing.T) {
+	inner := originOfError()
+	err := fmt.Errorf("outer: %w", inner)
+	if got := WithStack(err); got != err {
+		t.Fatalf("WithStack must not re-wrap an error that already has a stack")
+	}
+	var se *stackError
+	if !errors.As(err, &se) || len(se.pcs) == 0 {
+		t.Fatalf("expected captured pcs, got %v", se)
+	}
+	if err.Error() != "outer: boom" || !errors.Is(err, errors.Unwrap(inner)) {
+		t.Fatalf("message/unwrap changed: %v", err)
+	}
+	if WithStack(nil) != nil || ErrStack(errors.New("x")) != "" {
+		t.Fatalf("nil/plain errors must stay stackless")
+	}
+}
