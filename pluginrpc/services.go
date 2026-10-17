@@ -2263,10 +2263,24 @@ func (c *hostServicesClient) SetSchedule(_ context.Context, input pluginsdk.Sche
 
 func (c *hostServicesClient) Log(ctx context.Context, level pluginsdk.LogLevel, message string, attrs ...any) {
 	var reply Empty
+	encoded := logAttrs(attrs)
+	if level == pluginsdk.LogLevelError {
+		// 栈必须在插件进程里采：宿主收到后看到的只有 RPC 转发代码，对定位问题没有意义。
+		hasStack := false
+		for _, attr := range encoded {
+			if attr.Key == "stack" {
+				hasStack = true
+				break
+			}
+		}
+		if stack := pluginsdk.CompactStack(); !hasStack && stack != "" {
+			encoded = append(encoded, LogAttr{Key: "stack", Value: stack})
+		}
+	}
 	_ = c.call("Plugin.Log", LogRequest{
 		Level:   level,
 		Message: message,
-		Attrs:   logAttrs(attrs),
+		Attrs:   encoded,
 	}, &reply)
 }
 
