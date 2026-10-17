@@ -3,6 +3,7 @@ package pluginrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -93,6 +94,23 @@ func TestExtendedProviderAdaptersUseDispensedClient(t *testing.T) {
 	capabilities, err := m.(providers.ModelInputCapabilityProvider).InputCapabilities(context.Background(), modelConfig)
 	if err != nil || !capabilities.Images || !capabilities.TextFiles {
 		t.Fatalf("input capabilities = %+v, err=%v", capabilities, err)
+	}
+	toolProvider, ok := m.(providers.ModelToolCallProvider)
+	if !ok || !toolProvider.SupportsToolCalls(modelConfig) {
+		t.Fatalf("tool call support = %v", ok)
+	}
+	if toolProvider.SupportsToolCalls(providers.ModelConfig{ModelName: "other"}) {
+		t.Fatal("unsupported model must report false")
+	}
+	toolResult, err := toolProvider.GenerateWithTools(context.Background(), providers.ModelToolRequest{
+		Model: modelConfig, System: "sys", MaxTokens: 16,
+		Messages: []providers.ModelToolMessage{{Role: "user", Content: "hi"}},
+		Tools:    []providers.ModelToolSpec{{Name: "system.status_summary", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if err != nil || toolResult.Content != "done" || len(toolResult.ToolCalls) != 1 || toolResult.ToolCalls[0].ID != "call-1" ||
+		string(toolResult.ToolCalls[0].Arguments) != `{"a":1}` || model.toolReq.System != "sys" || len(model.toolReq.Tools) != 1 ||
+		model.toolReq.Messages[0].Content != "hi" {
+		t.Fatalf("tool result = %#v, recorded=%#v, err=%v", toolResult, model.toolReq, err)
 	}
 	downloaded, err := m.Download(context.Background(), providers.ModelDownloadRequest{
 		Model: modelConfig, TimeoutSeconds: 42, Now: func() time.Time { return fixed },
@@ -195,12 +213,24 @@ type recordingModelProvider struct {
 	validated   providers.ModelConfig
 	validateErr error
 	generate    providers.ModelGenerateRequest
+	toolReq     providers.ModelToolRequest
 	download    providers.ModelDownloadRequest
 	uninstall   providers.ModelUninstallRequest
 }
 
 func (p *recordingModelProvider) InputCapabilities(context.Context, providers.ModelConfig) (providers.ModelInputCapabilities, error) {
 	return providers.ModelInputCapabilities{Images: true, TextFiles: true}, nil
+}
+
+func (p *recordingModelProvider) SupportsToolCalls(model providers.ModelConfig) bool {
+	return model.ModelName == "qwen3"
+}
+func (p *recordingModelProvider) GenerateWithTools(_ context.Context, request providers.ModelToolRequest) (providers.ModelToolResult, error) {
+	p.toolReq = request
+	return providers.ModelToolResult{
+		Content: "done", Reasoning: "think",
+		ToolCalls: []providers.ModelToolCall{{ID: "call-1", Name: "system.status_summary", Arguments: json.RawMessage(`{"a":1}`)}},
+	}, nil
 }
 
 func (*recordingModelProvider) Kind() string { return "ollama" }

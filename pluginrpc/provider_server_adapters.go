@@ -408,6 +408,37 @@ func (s *rpcServer) ModelGenerate(req ModelGenerateRequest, reply *JSONReply) er
 	return setJSONReply(reply, value, callErr)
 }
 
+func (s *rpcServer) ModelSupportsToolCalls(req ModelConfigRequest, reply *ModelToolSupportResult) error {
+	p, closeFn, err := s.model(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	if tools, ok := p.(providers.ModelToolCallProvider); ok {
+		reply.Supported = tools.SupportsToolCalls(req.Model)
+	}
+	return nil
+}
+
+func (s *rpcServer) ModelGenerateWithTools(req ModelToolRequest, reply *JSONReply) error {
+	p, closeFn, err := s.model(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	tools, ok := p.(providers.ModelToolCallProvider)
+	if !ok {
+		return fmt.Errorf("model provider does not support tool calls")
+	}
+	progress, closeProgress := s.modelProgress(req.ProgressBrokerID)
+	defer closeProgress()
+	value, callErr := tools.GenerateWithTools(context.Background(), providers.ModelToolRequest{
+		Model: req.Model, System: req.System, Messages: req.Messages, Tools: req.Tools, Inputs: req.Inputs,
+		MaxTokens: req.MaxTokens, IncludeReasoning: req.IncludeReasoning, Now: restoreClock(req.Now, req.HasNow), Progress: progress,
+	})
+	return setJSONReply(reply, value, callErr)
+}
+
 func (s *rpcServer) ModelInputCapabilities(req ModelConfigRequest, reply *ModelInputCapabilitiesResult) error {
 	p, closeFn, err := s.model(req.Instance)
 	if err != nil {

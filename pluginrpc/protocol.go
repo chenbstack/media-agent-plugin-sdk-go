@@ -455,6 +455,26 @@ type ModelGenerateRequest struct {
 	ProgressBrokerID uint32
 }
 
+// ModelToolRequest 是 providers.ModelToolRequest 的线上形态，新增字段与
+// ModelGenerateRequest 同样遵循 gob 两向兼容的约定。
+type ModelToolRequest struct {
+	Instance         InstancePayload
+	Model            providers.ModelConfig
+	System           string
+	Messages         []providers.ModelToolMessage
+	Tools            []providers.ModelToolSpec
+	Inputs           []providers.ModelInput
+	MaxTokens        int
+	IncludeReasoning bool
+	Now              time.Time
+	HasNow           bool
+	ProgressBrokerID uint32
+}
+
+type ModelToolSupportResult struct {
+	Supported bool
+}
+
 type ModelInputCapabilitiesResult struct {
 	Capabilities providers.ModelInputCapabilities
 }

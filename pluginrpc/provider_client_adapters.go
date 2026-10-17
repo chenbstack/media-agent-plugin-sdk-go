@@ -670,6 +670,46 @@ func (p *modelProvider) Generate(ctx context.Context, request providers.ModelGen
 	return out, normalizeModelError(err)
 }
 
+// SupportsToolCalls 询问插件是否实现了 providers.ModelToolCallProvider 且支持该模型。
+// 任何错误（包括老插件不认识这个 RPC 方法）一律按不支持处理，让宿主退回 Generate。
+func (p *modelProvider) SupportsToolCalls(model providers.ModelConfig) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var out ModelToolSupportResult
+	err := p.session.withClient(ctx, "model_provider.supports_tool_calls", func(c *Client) error {
+		instance, release, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		if payloadErr != nil {
+			return payloadErr
+		}
+		defer release()
+		return c.call(ctx, "Plugin.ModelSupportsToolCalls", ModelConfigRequest{Instance: instance, Model: model}, &out)
+	})
+	return err == nil && out.Supported
+}
+
+func (p *modelProvider) GenerateWithTools(ctx context.Context, request providers.ModelToolRequest) (providers.ModelToolResult, error) {
+	var out providers.ModelToolResult
+	err := p.session.withClient(ctx, "model_provider.generate_with_tools", func(c *Client) error {
+		instance, release, payloadErr := c.instancePayload(ctx, p.inst, p.secrets)
+		if payloadErr != nil {
+			return payloadErr
+		}
+		defer release()
+		wire := ModelToolRequest{Instance: instance, Model: request.Model, System: request.System, Messages: request.Messages,
+			Tools: request.Tools, Inputs: request.Inputs, MaxTokens: request.MaxTokens, IncludeReasoning: request.IncludeReasoning}
+		wire.Now, wire.HasNow = snapshotClock(request.Now)
+		if request.Progress != nil {
+			wire.ProgressBrokerID = serveModelProgressSink(c.broker, request.Progress)
+		}
+		var reply JSONReply
+		if err := c.call(ctx, "Plugin.ModelGenerateWithTools", wire, &reply); err != nil {
+			return err
+		}
+		return decodeJSON(reply.Data, &out)
+	})
+	return out, normalizeModelError(err)
+}
+
 func (p *modelProvider) InputCapabilities(ctx context.Context, model providers.ModelConfig) (providers.ModelInputCapabilities, error) {
 	var out ModelInputCapabilitiesResult
 	err := p.session.withClient(ctx, "model_provider.input_capabilities", func(c *Client) error {

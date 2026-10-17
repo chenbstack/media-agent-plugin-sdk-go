@@ -4,6 +4,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"time"
@@ -523,7 +524,11 @@ type ModelConfig struct {
 	ContextTokens    int      `json:"context_tokens"`
 	DefaultMaxTokens int      `json:"default_max_tokens"`
 	SupportsImages   bool     `json:"supports_images,omitempty"`
-	Notes            string   `json:"notes,omitempty"`
+	// SupportsToolCalls 由用户为这个模型显式开启：端点确实实现了原生 tool calling。
+	// 默认关闭——许多兼容网关会静默忽略 tools 参数，宿主无法事后分辨，所以按
+	// fail-closed 处理，开启前一律走 Generate 的 JSON 协议。
+	SupportsToolCalls bool   `json:"supports_tool_calls,omitempty"`
+	Notes             string `json:"notes,omitempty"`
 }
 
 type ModelGenerateRequest struct {
@@ -561,6 +566,63 @@ type ModelInputCapabilities struct {
 // it are treated as text-only. Detection must fail closed when uncertain.
 type ModelInputCapabilityProvider interface {
 	InputCapabilities(ctx context.Context, model ModelConfig) (ModelInputCapabilities, error)
+}
+
+// ModelToolCallProvider is optional. A provider that implements it can take a
+// structured conversation plus tool schemas and return structured tool calls,
+// instead of the host teaching a JSON protocol inside Prompt and parsing it back
+// out of free text. Providers that do not implement it, or whose
+// SupportsToolCalls reports false for the model, keep working through Generate.
+// Detection must fail closed when uncertain.
+type ModelToolCallProvider interface {
+	// SupportsToolCalls reports whether GenerateWithTools can be used for model.
+	SupportsToolCalls(model ModelConfig) bool
+	GenerateWithTools(ctx context.Context, req ModelToolRequest) (ModelToolResult, error)
+}
+
+// ModelToolSpec describes one callable tool. InputSchema is a JSON Schema object.
+type ModelToolSpec struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+}
+
+// ModelToolMessage is one conversation turn. Role is system, user, assistant or
+// tool. An assistant turn that requested a tool carries ToolCallID/ToolName and
+// the call arguments as Content; the matching tool turn repeats ToolCallID and
+// carries the tool output as Content.
+type ModelToolMessage struct {
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+}
+
+type ModelToolCall struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+type ModelToolRequest struct {
+	Model            ModelConfig
+	System           string
+	Messages         []ModelToolMessage
+	Tools            []ModelToolSpec
+	Inputs           []ModelInput
+	MaxTokens        int
+	IncludeReasoning bool
+	Now              func() time.Time
+	Progress         ModelProgressFunc
+}
+
+type ModelToolResult struct {
+	Content   string
+	Reasoning string
+	ToolCalls []ModelToolCall
+	Stderr    string
+	Started   time.Time
+	Finished  time.Time
 }
 
 // ModelProgress is a provider-reported snapshot for long-running model
