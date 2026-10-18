@@ -525,7 +525,7 @@ func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver
 		inst.Sidecars != nil || inst.SidecarReader != nil || inst.Mirrors != nil || inst.Playback != nil || inst.PlaybackCache != nil || inst.Renderer != nil ||
 		inst.Cloud != nil || inst.SiteRules != nil || inst.SiteRulePacks != nil || inst.SiteRulePackKeys != nil ||
 		inst.TextGeneration != nil || inst.MediaMetadata != nil || inst.EntitlementProof != nil ||
-		inst.MediaLibrary != nil || inst.MediaArchive != nil
+		inst.MediaLibrary != nil || inst.MediaArchive != nil || inst.MediaDelete != nil || inst.SubscriptionCleanup != nil
 }
 
 func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) (InstancePayload, func(), error) {
@@ -587,6 +587,8 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			mediaMetadata:         inst.MediaMetadata,
 			mediaLibrary:          inst.MediaLibrary,
 			mediaArchive:          inst.MediaArchive,
+			mediaDelete:           inst.MediaDelete,
+			subscriptionCleanup:   inst.SubscriptionCleanup,
 			entitlementProof:      inst.EntitlementProof,
 		}
 		// 只对声明了复用的插件走池：老插件每次调用都会 Dial，而池化的通道已经被

@@ -66,6 +66,8 @@ type hostServicesState struct {
 	mediaMetadata         pluginsdk.MediaMetadata
 	mediaLibrary          pluginsdk.MediaLibrary
 	mediaArchive          pluginsdk.MediaArchive
+	mediaDelete           pluginsdk.MediaDelete
+	subscriptionCleanup   pluginsdk.SubscriptionCleanup
 }
 
 // hostServicesServer 是插件回调宿主的那一端。通道池会在每次租用前换掉 state，所以
@@ -836,6 +838,18 @@ type MediaArchiveRequest struct {
 	Input pluginsdk.MediaArchiveInput
 }
 
+type MediaDeleteRequest struct {
+	Input pluginsdk.MediaDeleteInput
+}
+
+type SubscriptionListRequest struct {
+	Query pluginsdk.SubscriptionQuery
+}
+
+type SubscriptionDeleteRequest struct {
+	Input pluginsdk.SubscriptionDeleteInput
+}
+
 // RendererAvailable 只报可用性，插件据此决定是否展示「浏览器仿真」开关。
 func (s *hostServicesServer) RendererAvailable(_ Empty, reply *JSONReply) error {
 	if s.live().renderer == nil {
@@ -1065,6 +1079,60 @@ func (s *hostServicesServer) ArchiveMedia(req MediaArchiveRequest, reply *JSONRe
 		return err
 	}
 	result, err := s.live().mediaArchive.Archive(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) DeleteMediaFiles(req MediaDeleteRequest, reply *JSONReply) error {
+	if s.live().mediaDelete == nil {
+		return fmt.Errorf("宿主未提供 MediaDelete")
+	}
+	if err := s.requireHostPermission("media.library.delete"); err != nil {
+		return err
+	}
+	result, err := s.live().mediaDelete.DeleteMediaFiles(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) ListSubscriptions(req SubscriptionListRequest, reply *JSONReply) error {
+	if s.live().subscriptionCleanup == nil {
+		return fmt.Errorf("宿主未提供 SubscriptionCleanup")
+	}
+	if err := s.requireHostPermission("subscriptions.read"); err != nil {
+		return err
+	}
+	result, err := s.live().subscriptionCleanup.ListSubscriptions(s.live().ctx, req.Query)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) DeleteSubscription(req SubscriptionDeleteRequest, reply *JSONReply) error {
+	if s.live().subscriptionCleanup == nil {
+		return fmt.Errorf("宿主未提供 SubscriptionCleanup")
+	}
+	if err := s.requireHostPermission("subscriptions.delete"); err != nil {
+		return err
+	}
+	result, err := s.live().subscriptionCleanup.DeleteSubscription(s.live().ctx, req.Input)
 	if err != nil {
 		return err
 	}
@@ -1895,6 +1963,33 @@ func (c *hostServicesClient) Archive(ctx context.Context, input pluginsdk.MediaA
 		return pluginsdk.MediaArchiveResult{}, err
 	}
 	var result pluginsdk.MediaArchiveResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) DeleteMediaFiles(ctx context.Context, input pluginsdk.MediaDeleteInput) (pluginsdk.MediaDeleteResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.DeleteMediaFiles", MediaDeleteRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.MediaDeleteResult{}, err
+	}
+	var result pluginsdk.MediaDeleteResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ListSubscriptions(ctx context.Context, query pluginsdk.SubscriptionQuery) ([]pluginsdk.SubscriptionInfo, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListSubscriptions", SubscriptionListRequest{Query: query}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.SubscriptionInfo
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) DeleteSubscription(ctx context.Context, input pluginsdk.SubscriptionDeleteInput) (pluginsdk.SubscriptionDeleteResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.DeleteSubscription", SubscriptionDeleteRequest{Input: input}, &reply); err != nil {
+		return pluginsdk.SubscriptionDeleteResult{}, err
+	}
+	var result pluginsdk.SubscriptionDeleteResult
 	return result, decodeJSON(reply.Data, &result)
 }
 

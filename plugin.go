@@ -729,7 +729,12 @@ type Instance struct {
 	// MediaArchive 执行宿主托管的复制校验与源文件清理；需要 host 权限
 	// "media.archive.write"。
 	MediaArchive MediaArchive
-	Runtime      *runtimesdk.Services
+	// MediaDelete 删除媒体库视频文件；需要 host 权限 "media.library.delete"。
+	MediaDelete MediaDelete
+	// SubscriptionCleanup 列出并删除订阅；需要 host 权限 "subscriptions.read" /
+	// "subscriptions.delete"。
+	SubscriptionCleanup SubscriptionCleanup
+	Runtime             *runtimesdk.Services
 }
 
 // AuthStartResult 是插件交互式认证流程的启动结果。
