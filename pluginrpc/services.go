@@ -1132,6 +1132,12 @@ func (s *hostServicesServer) DeleteSubscription(req SubscriptionDeleteRequest, r
 	if err := s.requireHostPermission("subscriptions.delete"); err != nil {
 		return err
 	}
+	// 连带删文件等于删媒体库内容，不能让只拿到订阅删除权限的插件借此绕过 media.library.delete。
+	if req.Input.DeleteFiles {
+		if err := s.requireHostPermission("media.library.delete"); err != nil {
+			return err
+		}
+	}
 	result, err := s.live().subscriptionCleanup.DeleteSubscription(s.live().ctx, req.Input)
 	if err != nil {
 		return err

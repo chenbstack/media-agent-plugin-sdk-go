@@ -73,7 +73,9 @@ type SubscriptionDeleteResult struct {
 }
 
 // SubscriptionCleanup 列出并删除订阅。ListSubscriptions 需要 host 权限
-// "subscriptions.read"，DeleteSubscription 需要 "subscriptions.delete"。
+// "subscriptions.read"，DeleteSubscription 需要 "subscriptions.delete"；
+// DeleteSubscriptionInput.DeleteFiles 为真时还需要 "media.library.delete"，
+// 宿主实现必须同样校验，不能只靠 RPC 层。
 type SubscriptionCleanup interface {
 	ListSubscriptions(ctx context.Context, query SubscriptionQuery) ([]SubscriptionInfo, error)
 	DeleteSubscription(ctx context.Context, input SubscriptionDeleteInput) (SubscriptionDeleteResult, error)

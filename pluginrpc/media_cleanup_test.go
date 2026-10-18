@@ -46,7 +46,15 @@ func TestCleanupHostServicesRequireSeparatePermissions(t *testing.T) {
 	if err := server.DeleteSubscription(SubscriptionDeleteRequest{Input: pluginsdk.SubscriptionDeleteInput{ID: "sub-1"}}, &reply); err == nil {
 		t.Fatal("subscriptions.delete 未声明时不应删除订阅")
 	}
-	server.live().permissions.Host = append(server.live().permissions.Host, "subscriptions.delete")
+	server.live().permissions.Host = []string{"subscriptions.delete"}
+	withFiles := SubscriptionDeleteRequest{Input: pluginsdk.SubscriptionDeleteInput{ID: "sub-1", DeleteFiles: true}}
+	if err := server.DeleteSubscription(withFiles, &reply); err == nil {
+		t.Fatal("DeleteFiles 未持有 media.library.delete 时不应删除订阅文件")
+	}
+	server.live().permissions.Host = []string{"subscriptions.delete", "media.library.delete"}
+	if err := server.DeleteSubscription(withFiles, &reply); err != nil {
+		t.Fatalf("DeleteSubscription(DeleteFiles): %v", err)
+	}
 	if err := server.DeleteSubscription(SubscriptionDeleteRequest{Input: pluginsdk.SubscriptionDeleteInput{ID: "sub-1"}}, &reply); err != nil {
 		t.Fatalf("DeleteSubscription: %v", err)
 	}
