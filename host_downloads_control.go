@@ -52,6 +52,9 @@ type DownloadTaskInfo struct {
 	Visible        bool   `json:"visible"`
 	AutoOrganize   bool   `json:"auto_organize"`
 	SubscriptionID string `json:"subscription_id,omitempty"`
+	// MediaID 是任务归属的媒体条目，与 MediaLibraryItem.MediaID、SubscriptionInfo.MediaID 同源，
+	// 清理类插件据此把下载任务跟媒体库文件关联起来。宿主没有归属信息时为空。
+	MediaID string `json:"media_id,omitempty"`
 }
 
 // DownloadFileInfo 是任务里的一个文件。

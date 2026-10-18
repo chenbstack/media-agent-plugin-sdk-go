@@ -36,8 +36,10 @@ type MediaDelete interface {
 
 // SubscriptionInfo 是一条订阅的只读快照。
 type SubscriptionInfo struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// MediaID 是订阅对应的媒体条目，与 MediaLibraryItem.MediaID 同源，用来跟媒体库文件关联。
+	MediaID   string `json:"media_id,omitempty"`
 	MediaType string `json:"media_type"`
 	Year      int    `json:"year,omitempty"`
 	Season    int    `json:"season,omitempty"`
