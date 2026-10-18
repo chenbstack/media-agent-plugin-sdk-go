@@ -337,6 +337,7 @@ func (p *mediaServerProvider) ItemsChangedSince(ctx context.Context, libraryID, 
 	}
 	return out.Items, out.Total, nil
 }
+
 // PlayedItems 对旧 Pack 或不支持播放记录的媒体服务器降级为空结果，而不是报错：
 // 播放记录只服务于“多久没播放”这类可选条件，不该拖垮媒体库同步。
 func (p *mediaServerProvider) PlayedItems(ctx context.Context) ([]providers.PlayedItem, error) {
