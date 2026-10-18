@@ -202,6 +202,20 @@ func (s *rpcServer) MediaServerItemsChangedSince(req MediaServerChangedItemsRequ
 	return nil
 }
 
+func (s *rpcServer) MediaServerPlayedItems(req InstancePayload, reply *JSONReply) error {
+	p, closeFn, err := s.mediaServer(req)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	playback, ok := p.(providers.MediaServerPlaybackProvider)
+	if !ok {
+		return setJSONReply(reply, MediaServerPlayedItemsReply{Supported: false}, nil)
+	}
+	items, callErr := playback.PlayedItems(context.Background())
+	return setJSONReply(reply, MediaServerPlayedItemsReply{Supported: true, Items: items}, callErr)
+}
+
 func (s *rpcServer) MediaServerSearch(req MediaServerSearchRequest, reply *JSONReply) error {
 	p, closeFn, err := s.mediaServer(req.Instance)
 	if err != nil {

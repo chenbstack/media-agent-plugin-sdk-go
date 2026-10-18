@@ -366,6 +366,11 @@ type MediaServerChangedItemsRequest struct {
 	Limit      int
 }
 
+type MediaServerPlayedItemsReply struct {
+	Supported bool
+	Items     []providers.PlayedItem
+}
+
 type MediaServerChangedItemsReply struct {
 	Supported bool
 	Items     []providers.LibraryItem

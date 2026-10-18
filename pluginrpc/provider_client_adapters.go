@@ -298,6 +298,7 @@ type mediaServerProvider struct {
 
 var _ providers.MediaServerProvider = (*mediaServerProvider)(nil)
 var _ providers.MediaServerIncrementalProvider = (*mediaServerProvider)(nil)
+var _ providers.MediaServerPlaybackProvider = (*mediaServerProvider)(nil)
 
 func (p *mediaServerProvider) Kind() string { return p.session.pluginID() }
 func (p *mediaServerProvider) TestConnection(ctx context.Context) error {
@@ -335,6 +336,20 @@ func (p *mediaServerProvider) ItemsChangedSince(ctx context.Context, libraryID, 
 		return nil, 0, providers.ErrIncrementalSyncUnsupported
 	}
 	return out.Items, out.Total, nil
+}
+// PlayedItems 对旧 Pack 或不支持播放记录的媒体服务器降级为空结果，而不是报错：
+// 播放记录只服务于“多久没播放”这类可选条件，不该拖垮媒体库同步。
+func (p *mediaServerProvider) PlayedItems(ctx context.Context) ([]providers.PlayedItem, error) {
+	var out MediaServerPlayedItemsReply
+	err := p.json(ctx, "media_server.played_items", "Plugin.MediaServerPlayedItems", nil, &out)
+	if err != nil {
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "can't find method") || strings.Contains(message, "method not found") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return out.Items, nil
 }
 func (p *mediaServerProvider) Search(ctx context.Context, query string) ([]providers.LibraryItem, error) {
 	var out []providers.LibraryItem
