@@ -364,6 +364,19 @@ type MediaServerIncrementalProvider interface {
 	ItemsChangedSince(ctx context.Context, libraryID, since string, startIndex, limit int) ([]LibraryItem, int, error)
 }
 
+// PlayedItem 是媒体服务器上一条被任意用户播放过的条目及其最近一次播放时间。
+type PlayedItem struct {
+	ExternalID   string
+	LastPlayedAt time.Time
+}
+
+// MediaServerPlaybackProvider 是 MediaServerProvider 的可选扩展：汇总所有用户的
+// 播放记录，每个条目取最近一次播放时间。从未被播放的条目不出现在结果里。
+// 不支持的实现不必实现它，宿主据此跳过播放记录同步。
+type MediaServerPlaybackProvider interface {
+	PlayedItems(ctx context.Context) ([]PlayedItem, error)
+}
+
 // MediaServerProvider 屏蔽 Emby、Jellyfin 等媒体库差异。
 type MediaServerProvider interface {
 	Kind() string
