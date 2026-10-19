@@ -14,10 +14,13 @@ type MediaLibraryItem struct {
 	Title         string `json:"title"`
 	PosterURL     string `json:"poster_url,omitempty"`
 	Year          int    `json:"year,omitempty"`
-	Path          string `json:"path"`
-	StorageID     string `json:"storage_id"`
-	SizeBytes     int64  `json:"size_bytes"`
-	ImportedAt    string `json:"imported_at"`
+	// VoteAverage 是媒体的数据源评分（TMDB 等），统一折算到 0-10。0 表示没有评分，
+	// 不是「评分为 0」。
+	VoteAverage float64 `json:"vote_average,omitempty"`
+	Path        string  `json:"path"`
+	StorageID   string  `json:"storage_id"`
+	SizeBytes   int64   `json:"size_bytes"`
+	ImportedAt  string  `json:"imported_at"`
 	// LastPlayedAt 为空表示宿主没有播放记录或从未播放。
 	LastPlayedAt string `json:"last_played_at,omitempty"`
 	Season       int    `json:"season,omitempty"`
