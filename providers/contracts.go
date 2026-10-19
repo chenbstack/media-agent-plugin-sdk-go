@@ -653,12 +653,21 @@ type ModelProgress struct {
 
 type ModelProgressFunc func(ModelProgress)
 
+// ModelUsage 是一次生成消耗的 token。上游没有回传用量时全为零；只有运行器不报
+// 用量、由 Provider 按文本长度估出来的，才会置 Estimated，调用方展示时应标「约」。
+type ModelUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	Estimated        bool
+}
+
 type ModelGenerateResult struct {
 	Output    string
 	Reasoning string
 	Stderr    string
 	Started   time.Time
 	Finished  time.Time
+	Usage     ModelUsage
 }
 
 type ModelDownloadRequest struct {

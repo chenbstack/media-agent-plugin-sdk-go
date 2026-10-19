@@ -58,6 +58,12 @@ type TextGenerationResult struct {
 	// ModelID 是实际用了哪个模型，永远是具体模型的 id，不会是 DefaultTextModel。
 	// 请求里跟随默认时，插件靠它写日志和落库，免得事后分不清某份产出是哪个模型出的。
 	ModelID string `json:"model_id"`
+	// PromptTokens / CompletionTokens 是这次生成实际消耗的 token，来自模型服务回传的
+	// 用量；服务没回传时为零，插件应当把零当作「未知」而不是「没用」。
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	// UsageEstimated 为真表示上面两个数是按文本长度估的，不是模型服务报的。
+	UsageEstimated bool `json:"usage_estimated,omitempty"`
 }
 
 // TextGeneration 让插件借宿主已配置的模型生成文本。
