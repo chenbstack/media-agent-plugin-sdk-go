@@ -17,10 +17,14 @@ type MediaLibraryItem struct {
 	// VoteAverage 是媒体的数据源评分（TMDB 等），统一折算到 0-10。0 表示没有评分，
 	// 不是「评分为 0」。
 	VoteAverage float64 `json:"vote_average,omitempty"`
-	Path        string  `json:"path"`
-	StorageID   string  `json:"storage_id"`
-	SizeBytes   int64   `json:"size_bytes"`
-	ImportedAt  string  `json:"imported_at"`
+	// Ratings 是各元数据源给出的评分，键为源 id（tmdb、douban…），统一折算到 0-10。
+	// 只含有评分的源；该源没有这部媒体的评分时不出现，调用方不要把缺失当成 0 分。
+	// VoteAverage 只是主数据源的那一份，按来源筛选请用这里。
+	Ratings    map[string]float64 `json:"ratings,omitempty"`
+	Path       string             `json:"path"`
+	StorageID  string             `json:"storage_id"`
+	SizeBytes  int64              `json:"size_bytes"`
+	ImportedAt string             `json:"imported_at"`
 	// LastPlayedAt 为空表示宿主没有播放记录或从未播放。
 	LastPlayedAt string `json:"last_played_at,omitempty"`
 	Season       int    `json:"season,omitempty"`
