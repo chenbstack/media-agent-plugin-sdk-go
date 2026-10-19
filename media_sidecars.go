@@ -20,13 +20,18 @@ type SubtitleWrite struct {
 	Forced bool `json:"forced,omitempty"`
 	// Source 是给人看的来源说明，会进订阅追踪，如 "OpenSubtitles" 或站点名。
 	Source string `json:"source,omitempty"`
+	// Overwrite 为真时，同名 sidecar 已存在也照写并覆盖，结果的 Change 为 replaced。
+	// 默认（假）保留原件、返回 unchanged：自动流程不该改掉用户手工放的字幕。只有用户
+	// 明确要求「重新生成并覆盖」时才该置真。旧宿主不认这个字段，会照旧返回 unchanged。
+	Overwrite bool `json:"overwrite,omitempty"`
 }
 
 // SubtitleWriteResult 是一次字幕落盘的结果。
 type SubtitleWriteResult struct {
 	// Path 是宿主实际写入（或已存在）的 sidecar 路径，只用于展示和排查。
 	Path string `json:"path"`
-	// Change：created 落盘成功 / unchanged 同名文件已存在，宿主保留原文件没有覆盖。
+	// Change：created 落盘成功 / replaced 覆盖了同名文件（仅 Overwrite 为真时）/
+	// unchanged 同名文件已存在，宿主保留原文件没有覆盖。
 	//
 	// unchanged 不是失败，但插件该把它当成"我这次没起作用"——别再拿它当成功证据去
 	// 跳过后续来源。
@@ -35,6 +40,7 @@ type SubtitleWriteResult struct {
 
 const (
 	SubtitleWriteCreated   = "created"
+	SubtitleWriteReplaced  = "replaced"
 	SubtitleWriteUnchanged = "unchanged"
 )
 
