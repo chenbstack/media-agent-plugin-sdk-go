@@ -655,8 +655,10 @@ type Instance struct {
 	Entitlements     Entitlements
 	EntitlementProof EntitlementProofSource
 	SiteAccounts     SiteAccounts
-	Subscriptions    Subscriptions
-	Downloads        Downloads
+	// MetadataSources 只读列出已启用的元数据源；需要 host 权限 "metadata.sources.read"。
+	MetadataSources MetadataSources
+	Subscriptions   Subscriptions
+	Downloads       Downloads
 	// DownloadTasks 只读地看下载任务的实时状态，包括宿主和别的插件建的；
 	// 只在插件声明了 host 权限 "downloads.tasks.read" 时由宿主注入。
 	DownloadTasks DownloadTasks

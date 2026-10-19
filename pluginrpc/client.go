@@ -517,7 +517,7 @@ func isUnknownRPCMethod(err error) bool {
 // 都没有。所以判定集中在这里，并由测试逐项守着。
 func needsHostServices(inst pluginsdk.Instance, secrets pluginsdk.SecretResolver) bool {
 	return secrets != nil || inst.KV != nil || inst.DB != nil || inst.Logger != nil || inst.Runtime != nil ||
-		inst.SiteAccounts != nil || inst.Subscriptions != nil || inst.Downloads != nil || inst.DownloadTasks != nil ||
+		inst.SiteAccounts != nil || inst.MetadataSources != nil || inst.Subscriptions != nil || inst.Downloads != nil || inst.DownloadTasks != nil ||
 		inst.DownloadControl != nil || inst.TorrentPool != nil || inst.TorrentPoolRefresh != nil ||
 		inst.Transfers != nil ||
 		inst.Rules != nil || inst.Connections != nil || inst.ConnectionCredentials != nil || inst.Storages != nil ||
@@ -558,6 +558,7 @@ func (c *Client) instancePayload(ctx context.Context, inst pluginsdk.Instance, s
 			db:                    inst.DB,
 			logger:                inst.Logger,
 			siteAccounts:          inst.SiteAccounts,
+			metadataSources:       inst.MetadataSources,
 			subscriptions:         inst.Subscriptions,
 			downloads:             inst.Downloads,
 			downloadTasks:         inst.DownloadTasks,

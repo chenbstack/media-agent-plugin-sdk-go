@@ -52,6 +52,23 @@ type SiteAccountInfo struct {
 	ProfileSyncedAt string                 `json:"profile_synced_at,omitempty"`
 }
 
+// MetadataSourceInfo 是宿主里一个已启用的元数据源。Kind 是提供它的插件 id，也是
+// MediaLibraryItem.Ratings、MetaDetail 等处标识来源用的同一个键。
+type MetadataSourceInfo struct {
+	Kind string `json:"kind"`
+	// Name 是展示名；宿主没有更好的名字时等于 Kind。
+	Name string `json:"name"`
+}
+
+// MetadataSources 只读列出宿主已启用的元数据源，每个插件 id（Kind）一项，
+// 多个实例合并。需要 host 权限 "metadata.sources.read"。
+//
+// 插件要按元数据源分别展示或筛选（评分、榜单……）时用它取名单，不要自己写死
+// tmdb/douban：宿主新增元数据插件后，名单自动跟着变。
+type MetadataSources interface {
+	ListMetadataSources(ctx context.Context) ([]MetadataSourceInfo, error)
+}
+
 // SiteAccounts exposes stable site-account operations to plugins. It is a
 // domain capability, not a database facade.
 type SiteAccounts interface {

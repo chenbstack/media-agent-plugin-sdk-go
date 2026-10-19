@@ -889,6 +889,7 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.Logger = services
 	inst.Runtime = &runtimesdk.Services{Feedback: &runtimeFeedbackClient{host: services}}
 	inst.SiteAccounts = services
+	inst.MetadataSources = services
 	inst.Subscriptions = services
 	inst.Downloads = services
 	inst.DownloadTasks = services

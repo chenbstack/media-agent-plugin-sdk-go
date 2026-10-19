@@ -36,6 +36,7 @@ type hostServicesState struct {
 	db                    pluginsdk.PluginDB
 	logger                pluginsdk.Logger
 	siteAccounts          pluginsdk.SiteAccounts
+	metadataSources       pluginsdk.MetadataSources
 	subscriptions         pluginsdk.Subscriptions
 	downloads             pluginsdk.Downloads
 	downloadTasks         pluginsdk.DownloadTasks
@@ -634,6 +635,24 @@ func (s *hostServicesServer) SetSchedule(req ScheduleSetRequest, reply *JSONRepl
 	return s.hostWriteResult("schedules.write", func() (pluginsdk.HostWriteResult, error) {
 		return s.live().schedules.SetSchedule(s.live().ctx, req.Input)
 	}, reply)
+}
+
+func (s *hostServicesServer) ListMetadataSources(_ Empty, reply *JSONReply) error {
+	if s.live().metadataSources == nil {
+		return fmt.Errorf("宿主未提供 MetadataSources")
+	}
+	if err := s.requireHostPermission("metadata.sources.read"); err != nil {
+		return err
+	}
+	result, err := s.live().metadataSources.ListMetadataSources(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
 }
 
 func (s *hostServicesServer) ListSiteAccounts(_ Empty, reply *JSONReply) error {
@@ -1996,6 +2015,15 @@ func (c *hostServicesClient) DeleteSubscription(ctx context.Context, input plugi
 		return pluginsdk.SubscriptionDeleteResult{}, err
 	}
 	var result pluginsdk.SubscriptionDeleteResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ListMetadataSources(_ context.Context) ([]pluginsdk.MetadataSourceInfo, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.ListMetadataSources", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.MetadataSourceInfo
 	return result, decodeJSON(reply.Data, &result)
 }
 
