@@ -217,11 +217,12 @@ func (d *Downloader) setState(hash string, state providers.DownloadState) error 
 // ---- 媒体库 ----
 
 type MediaServer struct {
-	mu        sync.Mutex
-	libraries []providers.Library
-	items     []providers.LibraryItem
-	refreshed []string
-	connErr   error
+	mu           sync.Mutex
+	libraries    []providers.Library
+	items        []providers.LibraryItem
+	refreshed    []string
+	deletedPaths []string
+	connErr      error
 }
 
 var _ providers.MediaServerProvider = (*MediaServer)(nil)
@@ -324,6 +325,20 @@ func (m *MediaServer) RefreshItem(_ context.Context, externalID string) error {
 	defer m.mu.Unlock()
 	m.refreshed = append(m.refreshed, externalID)
 	return nil
+}
+
+func (m *MediaServer) NotifyDeletedPaths(_ context.Context, paths []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deletedPaths = append(m.deletedPaths, paths...)
+	return nil
+}
+
+// DeletedPaths 返回 NotifyDeletedPaths 收到过的路径，供测试断言。
+func (m *MediaServer) DeletedPaths() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.deletedPaths...)
 }
 
 func (m *MediaServer) RefreshLibrary(_ context.Context, externalLibraryID string) error {

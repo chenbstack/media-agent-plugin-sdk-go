@@ -377,6 +377,18 @@ type MediaServerPlaybackProvider interface {
 	PlayedItems(ctx context.Context) ([]PlayedItem, error)
 }
 
+// ErrDeletedPathsNotifyUnsupported 表示媒体服务器 Provider（或仍运行旧 SDK 的 Pack）
+// 不能按路径通知“文件已删除”，调用方应降级为条目级刷新。
+var ErrDeletedPathsNotifyUnsupported = errors.New("media server deleted-path notification unsupported")
+
+// MediaServerDeletedPathsProvider 是 MediaServerProvider 的可选扩展：宿主删除媒体文件后，
+// 按文件路径批量通知媒体服务器“这些文件没了”，由媒体服务器自行移除对应条目。
+// 它不触发媒体库扫描，一次请求可带多个路径；paths 必须是媒体服务器视角的路径。
+// 不支持的实现不必实现它，调用方收到 ErrDeletedPathsNotifyUnsupported 时降级处理。
+type MediaServerDeletedPathsProvider interface {
+	NotifyDeletedPaths(ctx context.Context, paths []string) error
+}
+
 // MediaServerProvider 屏蔽 Emby、Jellyfin 等媒体库差异。
 type MediaServerProvider interface {
 	Kind() string

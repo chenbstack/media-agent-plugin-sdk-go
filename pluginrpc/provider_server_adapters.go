@@ -254,6 +254,19 @@ func (s *rpcServer) MediaServerRefreshLibrary(req MediaServerIDRequest, _ *Empty
 	return p.RefreshLibrary(context.Background(), req.ExternalID)
 }
 
+func (s *rpcServer) MediaServerNotifyDeletedPaths(req MediaServerDeletedPathsRequest, reply *JSONReply) error {
+	p, closeFn, err := s.mediaServer(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	notifier, ok := p.(providers.MediaServerDeletedPathsProvider)
+	if !ok {
+		return setJSONReply(reply, MediaServerDeletedPathsReply{Supported: false}, nil)
+	}
+	return setJSONReply(reply, MediaServerDeletedPathsReply{Supported: true}, notifier.NotifyDeletedPaths(context.Background(), req.Paths))
+}
+
 func (s *rpcServer) MediaServerLatest(req MediaServerLatestRequest, reply *JSONReply) error {
 	p, closeFn, err := s.mediaServer(req.Instance)
 	if err != nil {

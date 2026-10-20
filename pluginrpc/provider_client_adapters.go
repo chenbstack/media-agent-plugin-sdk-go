@@ -372,6 +372,26 @@ func (p *mediaServerProvider) RefreshItem(ctx context.Context, externalID string
 func (p *mediaServerProvider) RefreshLibrary(ctx context.Context, externalLibraryID string) error {
 	return p.idCall(ctx, "media_server.refresh_library", "Plugin.MediaServerRefreshLibrary", externalLibraryID)
 }
+
+// NotifyDeletedPaths 对旧 Pack 或不支持的媒体服务器返回 ErrDeletedPathsNotifyUnsupported，
+// 由宿主降级为条目级刷新，而不是把兼容性差异当作删除失败。
+func (p *mediaServerProvider) NotifyDeletedPaths(ctx context.Context, paths []string) error {
+	var out MediaServerDeletedPathsReply
+	err := p.json(ctx, "media_server.notify_deleted_paths", "Plugin.MediaServerNotifyDeletedPaths", func(instance InstancePayload) any {
+		return MediaServerDeletedPathsRequest{Instance: instance, Paths: paths}
+	}, &out)
+	if err != nil {
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "can't find method") || strings.Contains(message, "method not found") {
+			return providers.ErrDeletedPathsNotifyUnsupported
+		}
+		return err
+	}
+	if !out.Supported {
+		return providers.ErrDeletedPathsNotifyUnsupported
+	}
+	return nil
+}
 func (p *mediaServerProvider) Latest(ctx context.Context, limit int) ([]providers.LibraryItem, error) {
 	var out []providers.LibraryItem
 	err := p.json(ctx, "media_server.latest", "Plugin.MediaServerLatest", func(instance InstancePayload) any {

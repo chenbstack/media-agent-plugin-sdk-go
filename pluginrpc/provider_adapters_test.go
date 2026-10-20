@@ -162,6 +162,13 @@ func TestProviderAdaptersUseDispensedClientForAllCoreProviders(t *testing.T) {
 	if err := m.RefreshLibrary(context.Background(), "lib"); err != nil {
 		t.Fatalf("media RefreshLibrary: %v", err)
 	}
+	deletedNotifier, ok := m.(providers.MediaServerDeletedPathsProvider)
+	if !ok {
+		t.Fatal("media deleted-paths adapter missing")
+	}
+	if err := deletedNotifier.NotifyDeletedPaths(context.Background(), []string{"/media/a.mkv"}); err != nil {
+		t.Fatalf("media NotifyDeletedPaths: %v", err)
+	}
 	if got, err := m.Latest(context.Background(), 1); err != nil || len(got) != 1 {
 		t.Fatalf("media Latest = %#v, %v", got, err)
 	}

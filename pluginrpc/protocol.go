@@ -392,6 +392,15 @@ type MediaServerIDRequest struct {
 	ExternalID string
 }
 
+type MediaServerDeletedPathsRequest struct {
+	Instance InstancePayload
+	Paths    []string
+}
+
+type MediaServerDeletedPathsReply struct {
+	Supported bool
+}
+
 type MediaServerLatestRequest struct {
 	Instance InstancePayload
 	Limit    int
