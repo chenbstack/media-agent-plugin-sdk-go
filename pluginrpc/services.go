@@ -861,6 +861,10 @@ type MediaDeleteRequest struct {
 	Input pluginsdk.MediaDeleteInput
 }
 
+type MediaVerifyRequest struct {
+	Input pluginsdk.MediaVerifyInput
+}
+
 type SubscriptionListRequest struct {
 	Query pluginsdk.SubscriptionQuery
 }
@@ -1116,6 +1120,28 @@ func (s *hostServicesServer) DeleteMediaFiles(req MediaDeleteRequest, reply *JSO
 		return err
 	}
 	result, err := s.live().mediaDelete.DeleteMediaFiles(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) VerifyMediaFiles(req MediaVerifyRequest, reply *JSONReply) error {
+	if s.live().mediaDelete == nil {
+		return fmt.Errorf("宿主未提供 MediaDelete")
+	}
+	if err := s.requireHostPermission("media.library.delete"); err != nil {
+		return err
+	}
+	verifier, ok := s.live().mediaDelete.(pluginsdk.MediaDeleteVerifier)
+	if !ok {
+		return pluginsdk.ErrMediaVerifyUnsupported
+	}
+	result, err := verifier.VerifyMediaFiles(s.live().ctx, req.Input)
 	if err != nil {
 		return err
 	}
@@ -1997,6 +2023,21 @@ func (c *hostServicesClient) DeleteMediaFiles(ctx context.Context, input plugins
 		return pluginsdk.MediaDeleteResult{}, err
 	}
 	var result pluginsdk.MediaDeleteResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+// VerifyMediaFiles 对不认识这个方法的旧宿主返回 ErrMediaVerifyUnsupported。
+func (c *hostServicesClient) VerifyMediaFiles(ctx context.Context, input pluginsdk.MediaVerifyInput) (pluginsdk.MediaVerifyResult, error) {
+	var reply JSONReply
+	if err := c.call("Plugin.VerifyMediaFiles", MediaVerifyRequest{Input: input}, &reply); err != nil {
+		message := err.Error()
+		if strings.Contains(message, "can't find method") || strings.Contains(message, "method not found") ||
+			strings.Contains(message, pluginsdk.ErrMediaVerifyUnsupported.Error()) {
+			return pluginsdk.MediaVerifyResult{}, pluginsdk.ErrMediaVerifyUnsupported
+		}
+		return pluginsdk.MediaVerifyResult{}, err
+	}
+	var result pluginsdk.MediaVerifyResult
 	return result, decodeJSON(reply.Data, &result)
 }
 

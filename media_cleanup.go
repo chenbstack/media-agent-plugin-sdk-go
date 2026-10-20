@@ -1,6 +1,9 @@
 package pluginsdk
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // 本文件是媒体清理类插件向宿主索取的破坏性能力：删媒体库文件、列出并删除订阅。
 // 删除下载任务沿用 DownloadControl.RemoveTask，不在这里重复定义。
@@ -33,6 +36,41 @@ type MediaDeleteResult struct {
 type MediaDelete interface {
 	DeleteMediaFiles(ctx context.Context, input MediaDeleteInput) (MediaDeleteResult, error)
 }
+
+// MediaVerifyInput 请求核对一批媒体库文件是否真的删干净了。
+type MediaVerifyInput struct {
+	FileRefs []string `json:"file_refs"`
+	// Repair 为真时，对核对出的残留动手处理：文件还在就再删一次，媒体服务器还留着条目就重新通知移除。
+	Repair bool `json:"repair,omitempty"`
+}
+
+// MediaVerifyItem 是一个文件句柄的核对结果。
+type MediaVerifyItem struct {
+	FileRef string `json:"file_ref"`
+	Path    string `json:"path,omitempty"`
+	// FileState 取值 gone（存储里已没有）/ exists（仍在）/ unknown（无法判断，如存储连不上或句柄失效）。
+	FileState string `json:"file_state"`
+	// ServerEntries 是媒体服务器缓存里仍指向该文件的条目数。
+	ServerEntries int `json:"server_entries"`
+	// Repaired 表示本次 Repair 实际处理过（重删文件或重新通知）。
+	Repaired bool `json:"repaired,omitempty"`
+	// Detail 是人能读的说明，如重删失败原因。
+	Detail string `json:"detail,omitempty"`
+}
+
+type MediaVerifyResult struct {
+	Items []MediaVerifyItem `json:"items"`
+}
+
+// MediaDeleteVerifier 是 MediaDelete 的可选扩展：核对删除结果，必要时补删。
+// 宿主较旧时不提供，调用方用类型断言探测；断言成功但调用返回 ErrMediaVerifyUnsupported
+// 同样表示宿主不支持。需要 host 权限 "media.library.delete"。
+type MediaDeleteVerifier interface {
+	VerifyMediaFiles(ctx context.Context, input MediaVerifyInput) (MediaVerifyResult, error)
+}
+
+// ErrMediaVerifyUnsupported 表示宿主版本过旧，没有核对删除结果的能力。
+var ErrMediaVerifyUnsupported = errors.New("宿主不支持核对媒体文件删除结果，请升级主程序")
 
 // SubscriptionInfo 是一条订阅的只读快照。
 type SubscriptionInfo struct {

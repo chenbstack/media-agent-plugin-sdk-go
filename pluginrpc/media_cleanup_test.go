@@ -72,3 +72,35 @@ func TestCleanupCapabilitiesOpenAndAttachHostChannel(t *testing.T) {
 		t.Fatalf("assembleInstance 未挂上清理能力: %+v", inst)
 	}
 }
+
+var _ pluginsdk.MediaDeleteVerifier = (*hostServicesClient)(nil)
+
+type stubMediaVerifier struct{ stubMediaDelete }
+
+func (stubMediaVerifier) VerifyMediaFiles(_ context.Context, input pluginsdk.MediaVerifyInput) (pluginsdk.MediaVerifyResult, error) {
+	items := make([]pluginsdk.MediaVerifyItem, 0, len(input.FileRefs))
+	for _, ref := range input.FileRefs {
+		items = append(items, pluginsdk.MediaVerifyItem{FileRef: ref, FileState: "exists", Repaired: input.Repair})
+	}
+	return pluginsdk.MediaVerifyResult{Items: items}, nil
+}
+
+func TestVerifyMediaFilesNeedsPermissionAndHostSupport(t *testing.T) {
+	var reply JSONReply
+	req := MediaVerifyRequest{Input: pluginsdk.MediaVerifyInput{FileRefs: []string{"f1"}, Repair: true}}
+
+	server := *newHostServicesServer(&hostServicesState{ctx: context.Background(), mediaDelete: stubMediaVerifier{}})
+	if err := server.VerifyMediaFiles(req, &reply); err == nil {
+		t.Fatal("media.library.delete 未声明时不应核对")
+	}
+	server.live().permissions.Host = []string{"media.library.delete"}
+	if err := server.VerifyMediaFiles(req, &reply); err != nil {
+		t.Fatalf("VerifyMediaFiles: %v", err)
+	}
+
+	old := *newHostServicesServer(&hostServicesState{ctx: context.Background(), mediaDelete: stubMediaDelete{}})
+	old.live().permissions.Host = []string{"media.library.delete"}
+	if err := old.VerifyMediaFiles(req, &reply); err == nil || err.Error() != pluginsdk.ErrMediaVerifyUnsupported.Error() {
+		t.Fatalf("宿主未实现核对时应返回不支持，得到 %v", err)
+	}
+}
