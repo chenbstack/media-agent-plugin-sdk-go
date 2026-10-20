@@ -267,6 +267,33 @@ func (s *rpcServer) MediaServerNotifyDeletedPaths(req MediaServerDeletedPathsReq
 	return setJSONReply(reply, MediaServerDeletedPathsReply{Supported: true}, notifier.NotifyDeletedPaths(context.Background(), req.Paths))
 }
 
+func (s *rpcServer) MediaServerMetadataItems(req MediaServerMetadataItemsRequest, reply *JSONReply) error {
+	p, closeFn, err := s.mediaServer(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	lister, ok := p.(providers.MediaServerMetadataProvider)
+	if !ok {
+		return setJSONReply(reply, MediaServerMetadataItemsReply{Supported: false}, nil)
+	}
+	items, total, err := lister.MetadataItems(context.Background(), req.LibraryID, req.StartIndex, req.Limit)
+	return setJSONReply(reply, MediaServerMetadataItemsReply{Supported: true, Items: items, Total: total}, err)
+}
+
+func (s *rpcServer) MediaServerRefreshItemMetadata(req MediaServerRefreshMetadataRequest, reply *JSONReply) error {
+	p, closeFn, err := s.mediaServer(req.Instance)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	refresher, ok := p.(providers.MediaServerMetadataProvider)
+	if !ok {
+		return setJSONReply(reply, MediaServerRefreshMetadataReply{Supported: false}, nil)
+	}
+	return setJSONReply(reply, MediaServerRefreshMetadataReply{Supported: true}, refresher.RefreshItemMetadata(context.Background(), req.ExternalID, req.ReplaceAll))
+}
+
 func (s *rpcServer) MediaServerLatest(req MediaServerLatestRequest, reply *JSONReply) error {
 	p, closeFn, err := s.mediaServer(req.Instance)
 	if err != nil {

@@ -401,6 +401,29 @@ type MediaServerDeletedPathsReply struct {
 	Supported bool
 }
 
+type MediaServerMetadataItemsRequest struct {
+	Instance   InstancePayload
+	LibraryID  string
+	StartIndex int
+	Limit      int
+}
+
+type MediaServerMetadataItemsReply struct {
+	Supported bool
+	Items     []providers.MetadataItem
+	Total     int
+}
+
+type MediaServerRefreshMetadataRequest struct {
+	Instance   InstancePayload
+	ExternalID string
+	ReplaceAll bool
+}
+
+type MediaServerRefreshMetadataReply struct {
+	Supported bool
+}
+
 type MediaServerLatestRequest struct {
 	Instance InstancePayload
 	Limit    int

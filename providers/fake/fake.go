@@ -221,12 +221,14 @@ type MediaServer struct {
 	libraries    []providers.Library
 	items        []providers.LibraryItem
 	refreshed    []string
+	metadata     []providers.MetadataItem
 	deletedPaths []string
 	connErr      error
 }
 
 var _ providers.MediaServerProvider = (*MediaServer)(nil)
 var _ providers.MediaServerIncrementalProvider = (*MediaServer)(nil)
+var _ providers.MediaServerMetadataProvider = (*MediaServer)(nil)
 
 func NewMediaServer() *MediaServer {
 	return &MediaServer{}
@@ -324,6 +326,47 @@ func (m *MediaServer) RefreshItem(_ context.Context, externalID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refreshed = append(m.refreshed, externalID)
+	return nil
+}
+
+// SetMetadataItems 设置 MetadataItems 返回的元数据快照，供测试使用。
+func (m *MediaServer) SetMetadataItems(items []providers.MetadataItem) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metadata = append([]providers.MetadataItem(nil), items...)
+}
+
+func (m *MediaServer) MetadataItems(_ context.Context, libraryID string, startIndex, limit int) ([]providers.MetadataItem, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var matched []providers.MetadataItem
+	for _, item := range m.metadata {
+		if libraryID == "" || item.LibraryID == libraryID {
+			matched = append(matched, item)
+		}
+	}
+	total := len(matched)
+	if startIndex < 0 {
+		startIndex = 0
+	}
+	if startIndex >= total {
+		return nil, total, nil
+	}
+	end := total
+	if limit > 0 && startIndex+limit < end {
+		end = startIndex + limit
+	}
+	return matched[startIndex:end], total, nil
+}
+
+func (m *MediaServer) RefreshItemMetadata(_ context.Context, externalID string, replaceAll bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mode := "missing:"
+	if replaceAll {
+		mode = "replace:"
+	}
+	m.refreshed = append(m.refreshed, mode+externalID)
 	return nil
 }
 

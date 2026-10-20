@@ -392,6 +392,47 @@ func (p *mediaServerProvider) NotifyDeletedPaths(ctx context.Context, paths []st
 	}
 	return nil
 }
+func isMethodNotFound(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "can't find method") || strings.Contains(message, "method not found")
+}
+
+// MetadataItems 对旧 Pack 或不支持的媒体服务器返回 ErrMetadataRefreshUnsupported。
+func (p *mediaServerProvider) MetadataItems(ctx context.Context, libraryID string, startIndex, limit int) ([]providers.MetadataItem, int, error) {
+	var out MediaServerMetadataItemsReply
+	err := p.json(ctx, "media_server.metadata_items", "Plugin.MediaServerMetadataItems", func(instance InstancePayload) any {
+		return MediaServerMetadataItemsRequest{Instance: instance, LibraryID: libraryID, StartIndex: startIndex, Limit: limit}
+	}, &out)
+	if err != nil {
+		if isMethodNotFound(err) {
+			return nil, 0, providers.ErrMetadataRefreshUnsupported
+		}
+		return nil, 0, err
+	}
+	if !out.Supported {
+		return nil, 0, providers.ErrMetadataRefreshUnsupported
+	}
+	return out.Items, out.Total, nil
+}
+
+// RefreshItemMetadata 对旧 Pack 或不支持的媒体服务器返回 ErrMetadataRefreshUnsupported。
+func (p *mediaServerProvider) RefreshItemMetadata(ctx context.Context, externalID string, replaceAll bool) error {
+	var out MediaServerRefreshMetadataReply
+	err := p.json(ctx, "media_server.refresh_item_metadata", "Plugin.MediaServerRefreshItemMetadata", func(instance InstancePayload) any {
+		return MediaServerRefreshMetadataRequest{Instance: instance, ExternalID: externalID, ReplaceAll: replaceAll}
+	}, &out)
+	if err != nil {
+		if isMethodNotFound(err) {
+			return providers.ErrMetadataRefreshUnsupported
+		}
+		return err
+	}
+	if !out.Supported {
+		return providers.ErrMetadataRefreshUnsupported
+	}
+	return nil
+}
+
 func (p *mediaServerProvider) Latest(ctx context.Context, limit int) ([]providers.LibraryItem, error) {
 	var out []providers.LibraryItem
 	err := p.json(ctx, "media_server.latest", "Plugin.MediaServerLatest", func(instance InstancePayload) any {

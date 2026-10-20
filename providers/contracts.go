@@ -389,6 +389,40 @@ type MediaServerDeletedPathsProvider interface {
 	NotifyDeletedPaths(ctx context.Context, paths []string) error
 }
 
+// ErrMetadataRefreshUnsupported 表示媒体服务器 Provider（或仍运行旧 SDK 的 Pack）没有
+// 元数据列举与刷新能力，调用方应提示用户升级官方插件包，而不是当作刷新失败。
+var ErrMetadataRefreshUnsupported = errors.New("media server metadata refresh unsupported")
+
+// MetadataItem 是媒体服务器里一个条目的元数据完整度快照，用来判断“元数据是否丢失”
+// 和“是否值得刷新”。时间都是 RFC3339，缺失为空串。
+type MetadataItem struct {
+	ExternalID string
+	LibraryID  string
+	ItemType   string // movie / series
+	Title      string
+	Year       int
+	// HasPoster / HasOverview / HasProviderIDs 为假表示该条目缺少封面 / 简介 / 任何外部数据源 ID。
+	HasPoster      bool
+	HasOverview    bool
+	HasProviderIDs bool
+	// PremiereDate 是首映（上映）日期；DateCreated 是入库时间；LastRefreshed 是媒体服务器最近一次
+	// 刷新元数据的时间。
+	PremiereDate  string
+	DateCreated   string
+	LastRefreshed string
+}
+
+// MediaServerMetadataProvider 是 MediaServerProvider 的可选扩展：列出条目的元数据完整度，
+// 并按条目刷新元数据。具体怎么刷新由媒体服务器 Provider 实现，调用方只决定刷新谁。
+// 不支持的实现不必实现它；经 RPC 的旧 Pack 会返回 ErrMetadataRefreshUnsupported。
+type MediaServerMetadataProvider interface {
+	// MetadataItems 分页列出库内电影和剧集（不含季和集）。startIndex 从 0 开始，返回库内总数。
+	MetadataItems(ctx context.Context, libraryID string, startIndex, limit int) ([]MetadataItem, int, error)
+	// RefreshItemMetadata 刷新单个条目的元数据。replaceAll 为假只补齐缺失字段，为真则用数据源
+	// 的结果覆盖已有元数据和图片。剧集会连带刷新其季和集。
+	RefreshItemMetadata(ctx context.Context, externalID string, replaceAll bool) error
+}
+
 // MediaServerProvider 屏蔽 Emby、Jellyfin 等媒体库差异。
 type MediaServerProvider interface {
 	Kind() string

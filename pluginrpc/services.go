@@ -69,6 +69,7 @@ type hostServicesState struct {
 	mediaArchive          pluginsdk.MediaArchive
 	mediaDelete           pluginsdk.MediaDelete
 	subscriptionCleanup   pluginsdk.SubscriptionCleanup
+	mediaServerMetadata   pluginsdk.MediaServerMetadata
 }
 
 // hostServicesServer 是插件回调宿主的那一端。通道池会在每次租用前换掉 state，所以
@@ -861,6 +862,14 @@ type MediaDeleteRequest struct {
 	Input pluginsdk.MediaDeleteInput
 }
 
+type MediaServerMetadataItemsQuery struct {
+	Query pluginsdk.MetadataItemQuery
+}
+
+type MediaServerMetadataRefreshInput struct {
+	Input pluginsdk.MetadataRefreshInput
+}
+
 type MediaVerifyRequest struct {
 	Input pluginsdk.MediaVerifyInput
 }
@@ -1142,6 +1151,64 @@ func (s *hostServicesServer) VerifyMediaFiles(req MediaVerifyRequest, reply *JSO
 		return pluginsdk.ErrMediaVerifyUnsupported
 	}
 	result, err := verifier.VerifyMediaFiles(s.live().ctx, req.Input)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) metadataService() (pluginsdk.MediaServerMetadata, error) {
+	if s.live().mediaServerMetadata == nil {
+		return nil, fmt.Errorf("宿主未提供 MediaServerMetadata")
+	}
+	if err := s.requireHostPermission("media.server.metadata"); err != nil {
+		return nil, err
+	}
+	return s.live().mediaServerMetadata, nil
+}
+
+func (s *hostServicesServer) ListMetadataServers(_ Empty, reply *JSONReply) error {
+	svc, err := s.metadataService()
+	if err != nil {
+		return err
+	}
+	result, err := svc.ListServers(s.live().ctx)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) ListMetadataItems(req MediaServerMetadataItemsQuery, reply *JSONReply) error {
+	svc, err := s.metadataService()
+	if err != nil {
+		return err
+	}
+	result, err := svc.ListItems(s.live().ctx, req.Query)
+	if err != nil {
+		return err
+	}
+	out, err := encodeJSON(result)
+	if err == nil {
+		*reply = out
+	}
+	return err
+}
+
+func (s *hostServicesServer) RefreshMetadataItems(req MediaServerMetadataRefreshInput, reply *JSONReply) error {
+	svc, err := s.metadataService()
+	if err != nil {
+		return err
+	}
+	result, err := svc.RefreshItems(s.live().ctx, req.Input)
 	if err != nil {
 		return err
 	}
@@ -2038,6 +2105,46 @@ func (c *hostServicesClient) VerifyMediaFiles(ctx context.Context, input plugins
 		return pluginsdk.MediaVerifyResult{}, err
 	}
 	var result pluginsdk.MediaVerifyResult
+	return result, decodeJSON(reply.Data, &result)
+}
+
+// metadataCall 把旧宿主不认识这些方法的报错映射成 ErrMetadataRefreshUnsupported。
+func (c *hostServicesClient) metadataCall(method string, args any, reply *JSONReply) error {
+	if err := c.call(method, args, reply); err != nil {
+		message := err.Error()
+		if strings.Contains(message, "can't find method") || strings.Contains(message, "method not found") ||
+			strings.Contains(message, pluginsdk.ErrMetadataRefreshUnsupported.Error()) {
+			return pluginsdk.ErrMetadataRefreshUnsupported
+		}
+		return err
+	}
+	return nil
+}
+
+func (c *hostServicesClient) ListServers(ctx context.Context) ([]pluginsdk.MetadataServer, error) {
+	var reply JSONReply
+	if err := c.metadataCall("Plugin.ListMetadataServers", Empty{}, &reply); err != nil {
+		return nil, err
+	}
+	var result []pluginsdk.MetadataServer
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) ListItems(ctx context.Context, query pluginsdk.MetadataItemQuery) (pluginsdk.MetadataItemPage, error) {
+	var reply JSONReply
+	if err := c.metadataCall("Plugin.ListMetadataItems", MediaServerMetadataItemsQuery{Query: query}, &reply); err != nil {
+		return pluginsdk.MetadataItemPage{}, err
+	}
+	var result pluginsdk.MetadataItemPage
+	return result, decodeJSON(reply.Data, &result)
+}
+
+func (c *hostServicesClient) RefreshItems(ctx context.Context, input pluginsdk.MetadataRefreshInput) (pluginsdk.MetadataRefreshResult, error) {
+	var reply JSONReply
+	if err := c.metadataCall("Plugin.RefreshMetadataItems", MediaServerMetadataRefreshInput{Input: input}, &reply); err != nil {
+		return pluginsdk.MetadataRefreshResult{}, err
+	}
+	var result pluginsdk.MetadataRefreshResult
 	return result, decodeJSON(reply.Data, &result)
 }
 

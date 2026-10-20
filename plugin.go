@@ -736,6 +736,9 @@ type Instance struct {
 	// SubscriptionCleanup 列出并删除订阅；需要 host 权限 "subscriptions.read" /
 	// "subscriptions.delete"。
 	SubscriptionCleanup SubscriptionCleanup
+	// MediaServerMetadata 列出媒体服务器条目的元数据完整度并请求刷新；需要 host 权限
+	// "media.server.metadata"。
+	MediaServerMetadata MediaServerMetadata
 	Runtime             *runtimesdk.Services
 }
 

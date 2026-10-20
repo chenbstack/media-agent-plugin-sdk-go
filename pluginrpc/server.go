@@ -922,6 +922,7 @@ func (s *rpcServer) assembleInstance(payload InstancePayload, services *hostServ
 	inst.MediaArchive = services
 	inst.MediaDelete = services
 	inst.SubscriptionCleanup = services
+	inst.MediaServerMetadata = services
 	return inst, nil
 }
 
