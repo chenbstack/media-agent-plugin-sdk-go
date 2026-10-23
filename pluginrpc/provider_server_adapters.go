@@ -273,6 +273,14 @@ func (s *rpcServer) MediaServerMetadataItems(req MediaServerMetadataItemsRequest
 		return err
 	}
 	defer closeFn()
+	if req.CheckPosterHealth {
+		checker, ok := p.(providers.MediaServerPosterHealthProvider)
+		if !ok {
+			return setJSONReply(reply, MediaServerMetadataItemsReply{Supported: false}, nil)
+		}
+		items, total, err := checker.MetadataItemsWithPosterHealth(context.Background(), req.LibraryID, req.StartIndex, req.Limit)
+		return setJSONReply(reply, MediaServerMetadataItemsReply{Supported: true, PosterHealthChecked: true, Items: items, Total: total}, err)
+	}
 	lister, ok := p.(providers.MediaServerMetadataProvider)
 	if !ok {
 		return setJSONReply(reply, MediaServerMetadataItemsReply{Supported: false}, nil)
@@ -287,6 +295,13 @@ func (s *rpcServer) MediaServerRefreshItemMetadata(req MediaServerRefreshMetadat
 		return err
 	}
 	defer closeFn()
+	if req.ReplaceImages {
+		refresher, ok := p.(providers.MediaServerImageRefreshProvider)
+		if !ok {
+			return setJSONReply(reply, MediaServerRefreshMetadataReply{Supported: false}, nil)
+		}
+		return setJSONReply(reply, MediaServerRefreshMetadataReply{Supported: true, ImageRefreshSupported: true}, refresher.RefreshItemMetadataWithImages(context.Background(), req.ExternalID, req.ReplaceAll, true))
+	}
 	refresher, ok := p.(providers.MediaServerMetadataProvider)
 	if !ok {
 		return setJSONReply(reply, MediaServerRefreshMetadataReply{Supported: false}, nil)

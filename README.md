@@ -35,6 +35,22 @@ Published builds should depend on an immutable tag. For local development
 across repositories, use an uncommitted `go.work` file rather than committing a
 relative `replace` directive.
 
+### Media-server poster health
+
+`MetadataItemQuery.CheckPosterHealth` opts into actual primary-image reads. A
+supporting host returns `MetadataItemPage.PosterHealthChecked=true` and per-item
+`PosterStatus` (`valid`, `broken`, `unknown`; empty when unchecked or untagged).
+Callers must verify the acknowledgement before using the result. Authentication,
+transport, rate-limit and generic server failures are unknown, not broken.
+
+Providers can add `MediaServerPosterHealthProvider` and
+`MediaServerImageRefreshProvider` without changing the base interfaces.
+`MetadataRefreshInput.ReplaceImages` replaces images independently of
+`ReplaceAll`, allowing damaged images to be refreshed while retaining existing
+metadata. The RPC adapter rejects legacy providers that do not acknowledge the
+optional checks or image replacement. Existing list/refresh calls keep their
+original behavior.
+
 ## Provider lifecycle
 
 默认每次 RPC 都调一次 `Plugin.NewXxx` 现造一个 Provider，因此挂在 Provider 字段上的任何状态

@@ -402,26 +402,30 @@ type MediaServerDeletedPathsReply struct {
 }
 
 type MediaServerMetadataItemsRequest struct {
-	Instance   InstancePayload
-	LibraryID  string
-	StartIndex int
-	Limit      int
+	Instance          InstancePayload
+	LibraryID         string
+	StartIndex        int
+	Limit             int
+	CheckPosterHealth bool
 }
 
 type MediaServerMetadataItemsReply struct {
-	Supported bool
-	Items     []providers.MetadataItem
-	Total     int
+	Supported           bool
+	PosterHealthChecked bool
+	Items               []providers.MetadataItem
+	Total               int
 }
 
 type MediaServerRefreshMetadataRequest struct {
-	Instance   InstancePayload
-	ExternalID string
-	ReplaceAll bool
+	Instance      InstancePayload
+	ExternalID    string
+	ReplaceAll    bool
+	ReplaceImages bool
 }
 
 type MediaServerRefreshMetadataReply struct {
-	Supported bool
+	Supported             bool
+	ImageRefreshSupported bool
 }
 
 type MediaServerLatestRequest struct {

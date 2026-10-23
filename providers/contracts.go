@@ -403,6 +403,7 @@ type MetadataItem struct {
 	Year       int
 	// HasPoster / HasOverview / HasProviderIDs 为假表示该条目缺少封面 / 简介 / 任何外部数据源 ID。
 	HasPoster      bool
+	PosterStatus   string // empty (unchecked), valid, broken, or unknown
 	HasOverview    bool
 	HasProviderIDs bool
 	// PremiereDate 是首映（上映）日期；DateCreated 是入库时间；LastRefreshed 是媒体服务器最近一次
@@ -421,6 +422,18 @@ type MediaServerMetadataProvider interface {
 	// RefreshItemMetadata 刷新单个条目的元数据。replaceAll 为假只补齐缺失字段，为真则用数据源
 	// 的结果覆盖已有元数据和图片。剧集会连带刷新其季和集。
 	RefreshItemMetadata(ctx context.Context, externalID string, replaceAll bool) error
+}
+
+// MediaServerPosterHealthProvider is an optional extension that verifies a tagged primary image by
+// reading the media server's generated image endpoint. It avoids treating a stale ImageTags value as
+// proof that the underlying poster can still be served.
+type MediaServerPosterHealthProvider interface {
+	MetadataItemsWithPosterHealth(ctx context.Context, libraryID string, startIndex, limit int) ([]MetadataItem, int, error)
+}
+
+// MediaServerImageRefreshProvider optionally replaces images independently of metadata.
+type MediaServerImageRefreshProvider interface {
+	RefreshItemMetadataWithImages(ctx context.Context, externalID string, replaceAll, replaceImages bool) error
 }
 
 // MediaServerProvider 屏蔽 Emby、Jellyfin 等媒体库差异。

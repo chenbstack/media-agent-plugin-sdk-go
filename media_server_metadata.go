@@ -30,6 +30,8 @@ type MetadataItemQuery struct {
 	LibraryID string `json:"library_id,omitempty"`
 	Offset    int    `json:"offset,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
+	// CheckPosterHealth requests a real media-server image read for items with a Primary image tag.
+	CheckPosterHealth bool `json:"check_poster_health,omitempty"`
 }
 
 // MetadataItem 是一个电影或剧集的元数据完整度快照。时间为 RFC3339，缺失为空串。
@@ -41,7 +43,9 @@ type MetadataItem struct {
 	Title     string `json:"title"`
 	Year      int    `json:"year,omitempty"`
 	// HasPoster / HasOverview / HasProviderIDs 为假表示缺少封面 / 简介 / 任何外部数据源 ID。
-	HasPoster      bool   `json:"has_poster"`
+	HasPoster bool `json:"has_poster"`
+	// PosterStatus is empty unless CheckPosterHealth was requested; values are valid, broken, or unknown.
+	PosterStatus   string `json:"poster_status,omitempty"`
 	HasOverview    bool   `json:"has_overview"`
 	HasProviderIDs bool   `json:"has_provider_ids"`
 	PremiereDate   string `json:"premiere_date,omitempty"`
@@ -51,6 +55,8 @@ type MetadataItem struct {
 
 type MetadataItemPage struct {
 	Items []MetadataItem `json:"items"`
+	// PosterHealthChecked acknowledges CheckPosterHealth; older hosts leave it false.
+	PosterHealthChecked bool `json:"poster_health_checked,omitempty"`
 	// Total 是该查询范围内的条目总数，用于翻页。
 	Total int `json:"total"`
 }
@@ -60,6 +66,8 @@ type MetadataRefreshInput struct {
 	ItemIDs  []string `json:"item_ids"`
 	// ReplaceAll 为假只补齐缺失的元数据，为真则用数据源结果覆盖已有元数据和图片。
 	ReplaceAll bool `json:"replace_all,omitempty"`
+	// ReplaceImages replaces images only, preserving existing metadata in missing mode.
+	ReplaceImages bool `json:"replace_images,omitempty"`
 }
 
 type MetadataRefreshItemResult struct {

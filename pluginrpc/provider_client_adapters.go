@@ -399,9 +399,17 @@ func isMethodNotFound(err error) bool {
 
 // MetadataItems 对旧 Pack 或不支持的媒体服务器返回 ErrMetadataRefreshUnsupported。
 func (p *mediaServerProvider) MetadataItems(ctx context.Context, libraryID string, startIndex, limit int) ([]providers.MetadataItem, int, error) {
+	return p.metadataItems(ctx, libraryID, startIndex, limit, false)
+}
+
+func (p *mediaServerProvider) MetadataItemsWithPosterHealth(ctx context.Context, libraryID string, startIndex, limit int) ([]providers.MetadataItem, int, error) {
+	return p.metadataItems(ctx, libraryID, startIndex, limit, true)
+}
+
+func (p *mediaServerProvider) metadataItems(ctx context.Context, libraryID string, startIndex, limit int, checkPosterHealth bool) ([]providers.MetadataItem, int, error) {
 	var out MediaServerMetadataItemsReply
 	err := p.json(ctx, "media_server.metadata_items", "Plugin.MediaServerMetadataItems", func(instance InstancePayload) any {
-		return MediaServerMetadataItemsRequest{Instance: instance, LibraryID: libraryID, StartIndex: startIndex, Limit: limit}
+		return MediaServerMetadataItemsRequest{Instance: instance, LibraryID: libraryID, StartIndex: startIndex, Limit: limit, CheckPosterHealth: checkPosterHealth}
 	}, &out)
 	if err != nil {
 		if isMethodNotFound(err) {
@@ -409,7 +417,7 @@ func (p *mediaServerProvider) MetadataItems(ctx context.Context, libraryID strin
 		}
 		return nil, 0, err
 	}
-	if !out.Supported {
+	if !out.Supported || (checkPosterHealth && !out.PosterHealthChecked) {
 		return nil, 0, providers.ErrMetadataRefreshUnsupported
 	}
 	return out.Items, out.Total, nil
@@ -417,9 +425,13 @@ func (p *mediaServerProvider) MetadataItems(ctx context.Context, libraryID strin
 
 // RefreshItemMetadata 对旧 Pack 或不支持的媒体服务器返回 ErrMetadataRefreshUnsupported。
 func (p *mediaServerProvider) RefreshItemMetadata(ctx context.Context, externalID string, replaceAll bool) error {
+	return p.RefreshItemMetadataWithImages(ctx, externalID, replaceAll, false)
+}
+
+func (p *mediaServerProvider) RefreshItemMetadataWithImages(ctx context.Context, externalID string, replaceAll, replaceImages bool) error {
 	var out MediaServerRefreshMetadataReply
 	err := p.json(ctx, "media_server.refresh_item_metadata", "Plugin.MediaServerRefreshItemMetadata", func(instance InstancePayload) any {
-		return MediaServerRefreshMetadataRequest{Instance: instance, ExternalID: externalID, ReplaceAll: replaceAll}
+		return MediaServerRefreshMetadataRequest{Instance: instance, ExternalID: externalID, ReplaceAll: replaceAll, ReplaceImages: replaceImages}
 	}, &out)
 	if err != nil {
 		if isMethodNotFound(err) {
@@ -427,7 +439,7 @@ func (p *mediaServerProvider) RefreshItemMetadata(ctx context.Context, externalI
 		}
 		return err
 	}
-	if !out.Supported {
+	if !out.Supported || (replaceImages && !out.ImageRefreshSupported) {
 		return providers.ErrMetadataRefreshUnsupported
 	}
 	return nil
