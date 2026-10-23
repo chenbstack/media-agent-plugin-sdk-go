@@ -273,6 +273,14 @@ func (s *rpcServer) MediaServerMetadataItems(req MediaServerMetadataItemsRequest
 		return err
 	}
 	defer closeFn()
+	if len(req.ItemIDs) > 0 {
+		lookup, ok := p.(providers.MediaServerMetadataLookupProvider)
+		if !ok {
+			return setJSONReply(reply, MediaServerMetadataItemsReply{Supported: false}, nil)
+		}
+		items, err := lookup.MetadataItemsByID(context.Background(), req.ItemIDs, req.CheckPosterHealth)
+		return setJSONReply(reply, MediaServerMetadataItemsReply{Supported: true, ItemIDsFiltered: true, PosterHealthChecked: req.CheckPosterHealth, Items: items, Total: len(items)}, err)
+	}
 	if req.CheckPosterHealth {
 		checker, ok := p.(providers.MediaServerPosterHealthProvider)
 		if !ok {

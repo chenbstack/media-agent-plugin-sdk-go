@@ -431,6 +431,12 @@ type MediaServerPosterHealthProvider interface {
 	MetadataItemsWithPosterHealth(ctx context.Context, libraryID string, startIndex, limit int) ([]MetadataItem, int, error)
 }
 
+// MediaServerMetadataLookupProvider reads fresh snapshots of exact items. Poster
+// image reads are opt-in, including when verifying an asynchronous refresh.
+type MediaServerMetadataLookupProvider interface {
+	MetadataItemsByID(ctx context.Context, itemIDs []string, checkPosterHealth bool) ([]MetadataItem, error)
+}
+
 // MediaServerImageRefreshProvider optionally replaces images independently of metadata.
 type MediaServerImageRefreshProvider interface {
 	RefreshItemMetadataWithImages(ctx context.Context, externalID string, replaceAll, replaceImages bool) error

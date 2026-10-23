@@ -406,6 +406,23 @@ func (p *mediaServerProvider) MetadataItemsWithPosterHealth(ctx context.Context,
 	return p.metadataItems(ctx, libraryID, startIndex, limit, true)
 }
 
+func (p *mediaServerProvider) MetadataItemsByID(ctx context.Context, itemIDs []string, checkPosterHealth bool) ([]providers.MetadataItem, error) {
+	var out MediaServerMetadataItemsReply
+	err := p.json(ctx, "media_server.metadata_items", "Plugin.MediaServerMetadataItems", func(instance InstancePayload) any {
+		return MediaServerMetadataItemsRequest{Instance: instance, ItemIDs: itemIDs, CheckPosterHealth: checkPosterHealth}
+	}, &out)
+	if err != nil && isMethodNotFound(err) {
+		return nil, providers.ErrMetadataRefreshUnsupported
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !out.Supported || !out.ItemIDsFiltered || (checkPosterHealth && !out.PosterHealthChecked) {
+		return nil, providers.ErrMetadataRefreshUnsupported
+	}
+	return out.Items, nil
+}
+
 func (p *mediaServerProvider) metadataItems(ctx context.Context, libraryID string, startIndex, limit int, checkPosterHealth bool) ([]providers.MetadataItem, int, error) {
 	var out MediaServerMetadataItemsReply
 	err := p.json(ctx, "media_server.metadata_items", "Plugin.MediaServerMetadataItems", func(instance InstancePayload) any {

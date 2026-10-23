@@ -18,6 +18,17 @@ type posterHealthProvider struct {
 	replaceAll, replaceImages bool
 }
 
+func (p *posterHealthProvider) MetadataItemsByID(_ context.Context, ids []string, health bool) ([]providers.MetadataItem, error) {
+	if len(ids) != 1 || ids[0] != "i1" {
+		return nil, errors.New("exact IDs changed")
+	}
+	status := ""
+	if health {
+		status = "valid"
+	}
+	return []providers.MetadataItem{{ExternalID: "i1", HasPoster: true, PosterStatus: status}}, nil
+}
+
 func (p *posterHealthProvider) MetadataItemsWithPosterHealth(_ context.Context, library string, start, limit int) ([]providers.MetadataItem, int, error) {
 	p.healthCalls++
 	if library != "lib1" || start != 2 || limit != 10 {
@@ -40,6 +51,12 @@ func TestPosterHealthProviderRPCRoundTrip(t *testing.T) {
 		return p, nil
 	}})
 	adapter := c.MediaServer(pluginsdk.Instance{ID: "s1"}, nil)
+	for _, health := range []bool{false, true} {
+		items, err := adapter.(providers.MediaServerMetadataLookupProvider).MetadataItemsByID(context.Background(), []string{"i1"}, health)
+		if err != nil || len(items) != 1 || items[0].ExternalID != "i1" || (items[0].PosterStatus == "valid") != health {
+			t.Fatalf("exact lookup=%+v health=%v err=%v", items, health, err)
+		}
+	}
 	items, total, err := adapter.(providers.MediaServerPosterHealthProvider).MetadataItemsWithPosterHealth(context.Background(), "lib1", 2, 10)
 	if err != nil || total != 3 || len(items) != 1 || items[0].PosterStatus != "broken" || p.healthCalls != 1 {
 		t.Fatalf("items=%+v total=%d calls=%d err=%v", items, total, p.healthCalls, err)
@@ -55,6 +72,9 @@ func TestPosterHealthRPCRejectsOldProvider(t *testing.T) {
 		return p, nil
 	}})
 	adapter := c.MediaServer(pluginsdk.Instance{ID: "s1"}, nil)
+	if _, err := adapter.(providers.MediaServerMetadataLookupProvider).MetadataItemsByID(context.Background(), []string{"i1"}, false); !errors.Is(err, providers.ErrMetadataRefreshUnsupported) {
+		t.Fatalf("exact lookup: %v", err)
+	}
 	if _, _, err := adapter.(providers.MediaServerPosterHealthProvider).MetadataItemsWithPosterHealth(context.Background(), "", 0, 10); !errors.Is(err, providers.ErrMetadataRefreshUnsupported) {
 		t.Fatalf("health: %v", err)
 	}
@@ -85,6 +105,9 @@ func TestPosterHealthRPCRequiresExplicitAcknowledgement(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 	c := &Client{client: rpc.NewClient(a), manifest: pluginsdk.Manifest{ID: "emby"}}
 	p := c.MediaServer(pluginsdk.Instance{ID: "s1"}, nil)
+	if _, err := p.(providers.MediaServerMetadataLookupProvider).MetadataItemsByID(context.Background(), []string{"i1"}, false); !errors.Is(err, providers.ErrMetadataRefreshUnsupported) {
+		t.Fatalf("legacy lookup must acknowledge exact filtering: %v", err)
+	}
 	if _, _, err := p.(providers.MediaServerPosterHealthProvider).MetadataItemsWithPosterHealth(context.Background(), "", 0, 10); !errors.Is(err, providers.ErrMetadataRefreshUnsupported) {
 		t.Fatalf("忽略新字段的旧RPC必须返回不支持: %v", err)
 	}

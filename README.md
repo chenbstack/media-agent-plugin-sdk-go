@@ -51,6 +51,14 @@ metadata. The RPC adapter rejects legacy providers that do not acknowledge the
 optional checks or image replacement. Existing list/refresh calls keep their
 original behavior.
 
+`MetadataItemQuery.ItemIDs` requests fresh snapshots of exactly those IDs.
+Providers may implement `MediaServerMetadataLookupProvider`; the host and RPC
+adapter explicitly acknowledge filtering with `ItemIDsFiltered=true`. Callers
+must reject an absent acknowledgement before attempting mutations. Optional
+poster checking still applies only when requested. Refresh acceptance is not
+completion: workflows must poll and verify repaired fields before counting
+success or recording a success cooldown.
+
 ## Provider lifecycle
 
 默认每次 RPC 都调一次 `Plugin.NewXxx` 现造一个 Provider，因此挂在 Provider 字段上的任何状态

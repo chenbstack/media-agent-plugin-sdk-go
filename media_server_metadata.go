@@ -30,6 +30,8 @@ type MetadataItemQuery struct {
 	LibraryID string `json:"library_id,omitempty"`
 	Offset    int    `json:"offset,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
+	// ItemIDs restricts reads to these exact items for post-refresh verification.
+	ItemIDs []string `json:"item_ids,omitempty"`
 	// CheckPosterHealth requests a real media-server image read for items with a Primary image tag.
 	CheckPosterHealth bool `json:"check_poster_health,omitempty"`
 }
@@ -57,6 +59,8 @@ type MetadataItemPage struct {
 	Items []MetadataItem `json:"items"`
 	// PosterHealthChecked acknowledges CheckPosterHealth; older hosts leave it false.
 	PosterHealthChecked bool `json:"poster_health_checked,omitempty"`
+	// ItemIDsFiltered acknowledges exact-ID filtering; old hosts leave it false.
+	ItemIDsFiltered bool `json:"item_ids_filtered,omitempty"`
 	// Total 是该查询范围内的条目总数，用于翻页。
 	Total int `json:"total"`
 }

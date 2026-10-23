@@ -403,6 +403,7 @@ type MediaServerDeletedPathsReply struct {
 
 type MediaServerMetadataItemsRequest struct {
 	Instance          InstancePayload
+	ItemIDs           []string
 	LibraryID         string
 	StartIndex        int
 	Limit             int
@@ -411,6 +412,7 @@ type MediaServerMetadataItemsRequest struct {
 
 type MediaServerMetadataItemsReply struct {
 	Supported           bool
+	ItemIDsFiltered     bool
 	PosterHealthChecked bool
 	Items               []providers.MetadataItem
 	Total               int
